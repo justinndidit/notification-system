@@ -1,0 +1,416 @@
+name: notification-system
+
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:16
+    env_file:
+      - path: .env
+        required: true
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pg-admin:
+    image: dpage/pgadmin4
+    restart: unless-stopped
+    container_name: pg-admin
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - '5050:80'
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+    env_file:
+      - .env
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  consul:
+    image: hashicorp/consul:latest
+    container_name: consul
+    restart: unless-stopped
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0 -bind=0.0.0.0
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    volumes:
+      - consul_data:/consul/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # API Gateway (NestJS) - Entry point for all requests
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: api-gateway
+      SERVICE_PORT: 3000
+      # Service discovery
+      USER_SERVICE_NAME: user-service
+      TEMPLATE_SERVICE_NAME: template-service
+      ORCHESTRATOR_SERVICE_NAME: orchestrator
+      # JWT/Auth
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      # Rate limiting
+      RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+    ports:
+      - "3000:3000"
+    networks:
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # User Service (NestJS)
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: user_service_db
+      # Or connection string
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/user_service_db
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # Service discovery
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: user-service
+      SERVICE_PORT: 3001
+    ports:
+      - "3001:3001"
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Template Service (NestJS)
+  template-service:
+    build:
+      context: ./services/template-service
+      dockerfile: Dockerfile
+    container_name: template-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3003
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: template_service_db
+      # Or connection string
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/template_service_db
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # Service discovery
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: template-service
+      SERVICE_PORT: 3003
+    ports:
+      - "3003:3003"
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Orchestrator (Golang)
+  orchestrator:
+    build:
+      context: ./services/orchestrator
+      dockerfile: Dockerfile
+    container_name: orchestrator
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3002
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: notification_db
+      # Or connection string
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/notification_db
+      # Redis & RabbitMQ
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # Service discovery
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: orchestrator
+      SERVICE_PORT: 3002
+      USER_SERVICE_NAME: user-service
+      TEMPLATE_SERVICE_NAME: template-service
+    ports:
+      - "3002:3002"
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      template-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Email Service (Python)
+  email-service:
+    build:
+      context: ./services/email-service
+      dockerfile: Dockerfile
+    container_name: email-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3004
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: notification_db
+      # Or connection string
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/notification_db
+      # Redis & RabbitMQ
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # Service discovery
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: email-service
+      SERVICE_PORT: 3004
+      # SMTP Configuration
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      FROM_EMAIL: ${FROM_EMAIL}
+      FROM_NAME: ${FROM_NAME}
+      # Upstream services
+      USER_SERVICE_NAME: user-service
+      TEMPLATE_SERVICE_NAME: template-service
+    ports:
+      - "3004:3004"
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 2
+
+  # Push Service (Golang)
+  push-service:
+    build:
+      context: ./services/push-service
+      dockerfile: Dockerfile
+    container_name: push-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3005
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: notification_db
+      # Or connection string
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/notification_db
+      # RabbitMQ
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # Service discovery
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: push-service
+      SERVICE_PORT: 3005
+      # Push credentials
+      FCM_CREDENTIALS_PATH: /app/credentials/fcm-credentials.json
+      APNS_AUTH_KEY_PATH: /app/credentials/apns-auth-key.p8
+      APNS_KEY_ID: ${APNS_KEY_ID}
+      APNS_TEAM_ID: ${APNS_TEAM_ID}
+      # Upstream services
+      USER_SERVICE_NAME: user-service
+      TEMPLATE_SERVICE_NAME: template-service
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./credentials:/app/credentials:ro
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 2
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres:
+    driver: local
+  redis_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  consul_data:
+    driver: local

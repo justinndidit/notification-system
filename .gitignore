@@ -1,0 +1,148 @@
+# ======================================================
+# 🧠 ROOT, NX, & MONOREPO CONFIG
+# ======================================================
+# Nx and package manager artifacts
+node_modules/
+dist/
+build/
+coverage/
+.nx/
+.pnpm-store/
+.pnpm-debug.log*
+pnpm-lock.yaml          # pnpm lock file MUST be committed.
+Taskfile.lock.yml
+
+# Go workspace sum file
+go.work.sum
+
+# Standard build outputs
+*.log
+logs/
+tmp/
+.cache/
+*.pid
+*.seed
+*.tgz
+*.tsbuildinfo
+
+# Environment variables and secrets (NEVER commit these)
+.env
+.env.local
+.env.development
+.env.production
+./**/.env*
+secrets.json
+credentials.json
+firebase-service-account.json
+service-account.json
+*.pem
+*.key
+*.crt
+
+# ======================================================
+# 🐳 DOCKER / INFRA
+# ======================================================
+infra/.env
+infra/data/
+infra/volumes/
+infra/logs/
+docker-compose.override.yml
+docker-compose.local.yml
+*.bak
+
+# ======================================================
+# 🐍 PYTHON SERVICES
+# ======================================================
+# Compiled Python artifacts
+**/__pycache__/
+**/*.py[cod]
+**/*.egg
+**/*.egg-info/
+**/*.whl
+
+# Virtual environments
+**/.venv/
+**/venv/
+.pipenv/
+Pipfile.lock              # Keep if using Pipenv, otherwise ignore
+.poetry/
+poetry.lock               # Keep if using Poetry, otherwise ignore
+
+# Caching and testing
+**/.pytest_cache/
+**/.mypy_cache/
+**/.tox/
+**/.coverage
+
+# ======================================================
+# 🧰 GO SERVICES
+# ======================================================
+# Binaries, shared libraries, and build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*_test
+
+# Dependency directory
+vendor/
+
+# Local build artifacts (compiled binaries, caches)
+/bin/
+/pkg/
+
+# Go module files MUST be committed
+# go.mod
+# go.sum
+
+# ======================================================
+# 🧱 NESTJS / JAVASCRIPT SERVICES (Node.js)
+# ======================================================
+# Standard Node build/output directories
+**/out/
+**/lib/
+
+# NestJS/TypeScript compilation outputs (may be different from the root `dist/` or `build/`)
+packages/common/dist/
+packages/proto/dist/
+
+# NPM/Yarn artifacts (pnpm is covered at the top)
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/package-lock.json
+
+# ======================================================
+# 🧪 TESTING / CI / DOCUMENTATION
+# ======================================================
+reports/
+.junit/
+*.lcov
+*.coverprofile
+docs/generated/
+docs/_build/
+
+# ======================================================
+# 🧾 DATABASE / MIGRATIONS / SQL
+# ======================================================
+**/*.sqlite
+**/*.db
+**/*.sql~
+scripts/*.log
+
+# ======================================================
+# 🐧 SYSTEM & EDITOR FILES
+# ======================================================
+# macOS/Windows system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Editor-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
