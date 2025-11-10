@@ -87,7 +87,11 @@ export class UserService {
 
   //GET ALL USER
   async getAllUsers() {
-    const users = await this.prisma.user.findMany();
+    const users = await this.prisma.user.findMany({
+      include: {
+        preferences: true,
+      },
+    });
     if (!users) {
       throw new NotFoundException('Users not found');
     }
@@ -96,7 +100,22 @@ export class UserService {
     return safeUsers;
   }
 
-  //PREFERENCE
+  //GET USER BY ID
+  async getUserById(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        preferences: true,
+      },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  //UPDATE PREFERENCE
   async updatePreference(userId: string, updateDto: UpdatePreferenceDto) {
     // Check if preference exists for user
     const existingPreference = await this.prisma.preference.findUnique({
@@ -116,6 +135,16 @@ export class UserService {
     });
 
     return { message: 'Preference updated successfully', updatedPreference };
+  }
+
+  //GET ALL PREFERENCE
+  async getAllUsersPreference() {
+    const preferences = await this.prisma.preference.findMany();
+    if (!preferences) {
+      throw new NotFoundException('Preferences not found');
+    }
+
+    return preferences;
   }
 
   //GET users preference by Ids
