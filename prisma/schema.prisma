@@ -11,10 +11,10 @@ enum NotificationChannel {
   PUSH
 }
 
-enum TemplateEvent {
-  WELCOME_MESSAGE
-  DISCOUNT_MESSAGE
-}
+// enum TemplateEvent {
+//   WELCOME_MESSAGE
+//   DISCOUNT_MESSAGE
+// }
 
 model User {
   id             String        @id @default(uuid())
@@ -45,8 +45,8 @@ model Preference {
 model Template {
   id          String             @id @default(uuid())
   name        String             // e.g., "Order Confirmation"
-  event       TemplateEvent      // E-com trigger
-  channel     NotificationChannel // EMAIL or PUSH
+  event       String      // E-com trigger
+  channel     NotificationChannel[] // EMAIL or PUSH
   language    String             @default("en")// e.g., 'en', 'fr' (ISO code)
   isActive    Boolean            @default(true)
   created_at  DateTime           @default(now())
@@ -56,8 +56,8 @@ model Template {
   // Optional: owner User? @relation(fields: [user_id], references: [id])
   // user_id    String?
 
-  @@unique([event, channel, language]) // One active per combo
-  @@index([event, channel, language])
+  @@unique([event, language]) // One active per combo
+  @@index([event, language])
 }
 
 model TemplateVersion {

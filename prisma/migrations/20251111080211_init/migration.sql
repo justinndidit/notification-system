@@ -37,7 +37,7 @@ CREATE TABLE "Template" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "event" "TemplateEvent" NOT NULL,
-    "channel" "NotificationChannel" NOT NULL,
+    "channel" "NotificationChannel"[],
     "language" TEXT NOT NULL DEFAULT 'en',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -70,10 +70,10 @@ CREATE UNIQUE INDEX "User_push_token_key" ON "User"("push_token");
 CREATE UNIQUE INDEX "Preference_user_id_key" ON "Preference"("user_id");
 
 -- CreateIndex
-CREATE INDEX "Template_event_channel_language_idx" ON "Template"("event", "channel", "language");
+CREATE INDEX "Template_event_language_idx" ON "Template"("event", "language");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Template_event_channel_language_key" ON "Template"("event", "channel", "language");
+CREATE UNIQUE INDEX "Template_event_language_key" ON "Template"("event", "language");
 
 -- CreateIndex
 CREATE INDEX "TemplateVersion_template_id_version_idx" ON "TemplateVersion"("template_id", "version");
