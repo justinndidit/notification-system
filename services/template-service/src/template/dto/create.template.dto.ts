@@ -7,6 +7,9 @@ import {
   IsOptional,
   IsBoolean,
   IsObject,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 
 export class CreateTemplateDto {
@@ -47,4 +50,16 @@ export class UpdateTemplateDto extends PartialType(CreateTemplateDto) {
 export class RenderTemplateDto {
   @IsObject()
   data: Record<string, any>; // Vars to substitute, e.g., { user: { name: 'John' }, order: { id: '123' } }
+}
+export class PaginationDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50) // Cap to prevent abuse
+  limit?: number = 10;
 }

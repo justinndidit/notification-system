@@ -6,12 +6,17 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateTemplateDto,
+  PaginationDto,
   RenderTemplateDto,
   UpdateTemplateDto,
 } from './dto/create.template.dto';
 import * as Handlebars from 'handlebars';
-import { NotificationChannel } from '@prisma/client';
-import { RenderedMessage } from 'src/types/types';
+import { NotificationChannel, Prisma, Template } from '@prisma/client';
+import {
+  PaginatedResponse,
+  PaginationMeta,
+  RenderedMessage,
+} from 'src/types/types';
 
 @Injectable()
 export class TemplateService {
@@ -62,22 +67,60 @@ export class TemplateService {
   }
 
   //FIND TEMPLATE
-  async findAll(
-    name?: string,
-    language = 'en',
-    event?: string,
-    channel?: NotificationChannel,
-  ) {
-    return this.prisma.template.findMany({
-      where: {
-        ...(name && { name }),
-        ...(language && { language }),
-        ...(event && { event }),
-        ...(channel && { channel: { has: channel } }),
-        isActive: true,
-      },
-      include: { versions: { orderBy: { version: 'desc' }, take: 1 } }, // Latest version
-    });
+  async getPaginatedTemplates(
+    paginationDto: PaginationDto,
+    filters?: {
+      name?: string;
+      language?: string;
+      event?: string;
+      channel?: NotificationChannel[];
+    },
+  ): Promise<PaginatedResponse<Template>> {
+    const page = paginationDto.page ?? 1;
+    const limit = paginationDto.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    // Build where clause (merge filters)
+    const where = {
+      isActive: true,
+      ...(filters?.name && {
+        name: { contains: filters.name, mode: Prisma.QueryMode.insensitive },
+      }), // Fuzzy search
+      ...(filters?.language && { language: filters.language }),
+      ...(filters?.event && { event: filters.event }),
+      ...(filters?.channel && { channel: { hasSome: filters.channel } }), // Array for multi-channel
+    };
+
+    // Parallel: count + data
+    const [total, templates] = await Promise.all([
+      this.prisma.template.count({ where }),
+      this.prisma.template.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' }, // Or { name: 'asc' }—sensible default
+        include: { versions: { orderBy: { version: 'desc' }, take: 1 } }, // Latest version
+      }),
+    ]);
+    const totalPages = Math.ceil(total / limit);
+    const meta: PaginationMeta = {
+      total,
+      limit,
+      page,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_previous: page > 1,
+    };
+
+    if (!templates) {
+      throw new NotFoundException(`No templates found on page ${page}`);
+    }
+
+    if (templates.length === 0 && page > 1) {
+      throw new NotFoundException(`No templates found on page ${page}`);
+    }
+
+    return { data: templates, meta };
   }
 
   //FIND TEMPLATE BY ID

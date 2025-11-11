@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  
 }
 
 datasource db {
@@ -11,10 +12,7 @@ enum NotificationChannel {
   PUSH
 }
 
-// enum TemplateEvent {
-//   WELCOME_MESSAGE
-//   DISCOUNT_MESSAGE
-// }
+
 
 model User {
   id             String        @id @default(uuid())
@@ -24,7 +22,7 @@ model User {
   role           String        @default("user")
   created_at     DateTime      @default(now())
   updated_at     DateTime      @updatedAt
-  push_token     String?   @unique
+  push_token     Json?   
   preferences    Preference?
 }
 

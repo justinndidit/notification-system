@@ -15,6 +15,7 @@ import { TemplateService } from './template.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
   CreateTemplateDto,
+  PaginationDto,
   RenderTemplateDto,
   UpdateTemplateDto,
 } from './dto/create.template.dto';
@@ -37,21 +38,18 @@ export class TemplateController {
   }
 
   @Get()
-  findAll(
+  getAllTemplates(
+    @Query() paginationDto: PaginationDto,
     @Query('name') name?: string,
     @Query('language') language?: string,
     @Query('event') event?: string,
     @Query('channel') channel?: string,
   ) {
     const channelEnum = channel
-      ? (channel.toUpperCase() as NotificationChannel)
+      ? [channel.toUpperCase() as NotificationChannel]
       : undefined;
-    return this.templatesService.findAll(
-      name,
-      language ?? 'en',
-      event?.toUpperCase(),
-      channelEnum,
-    );
+    const filters = { name, language, event, channel: channelEnum };
+    return this.templatesService.getPaginatedTemplates(paginationDto, filters);
   }
 
   @Get(':id')

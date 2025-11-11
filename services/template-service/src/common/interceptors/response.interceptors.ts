@@ -26,7 +26,7 @@ export class ResponseInterceptor<T> implements NestInterceptor {
         if (data?.meta) {
           return {
             success: true,
-            data: data.data ?? null,
+            data: data.data ?? {},
             message: data.message ?? 'Request successful',
             meta: data.meta,
           };
@@ -37,7 +37,7 @@ export class ResponseInterceptor<T> implements NestInterceptor {
           success: true,
           data,
           message: 'Request successful',
-          meta: null,
+          meta: {},
         };
       }),
     );
@@ -62,8 +62,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       success: false,
       error: message,
       message,
-      data: null,
-      meta: null,
+      data: {},
+      meta: {},
     });
   }
 }
