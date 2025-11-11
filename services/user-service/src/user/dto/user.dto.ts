@@ -8,6 +8,10 @@ import {
 } from 'class-validator';
 
 export class RegisterDto {
+  @IsString()
+  name: string;
+
+  @IsString()
   @IsEmail({}, { message: 'Please provide a valid email address' })
   email: string;
 
