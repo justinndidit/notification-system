@@ -1,22 +1,22 @@
-version: '3'
+# version: '3'
 
-vars:
-  TASKER_DB_DSN: '{{.TASKER_DB_DSN | default ""}}'
+# vars:
+#   TASKER_DB_DSN: '{{.TASKER_DB_DSN | default ""}}'
 
-tasks:
-  help:
-    desc: print this help message
-    cmds:
-    - task --list-all
-    silent: true
+# tasks:
+#   help:
+#     desc: print this help message
+#     cmds:
+#     - task --list-all
+#     silent: true
 
-  confirm:
-    desc: confirmation prompt
-    cmds:
-    - |
-      echo -n 'Are you sure? [y/N] ' && read ans && [ ${ans:-N} = y ]
-    silent: true
-    internal: true
+#   confirm:
+#     desc: confirmation prompt
+#     cmds:
+#     - |
+#       echo -n 'Are you sure? [y/N] ' && read ans && [ ${ans:-N} = y ]
+#     silent: true
+#     internal: true
 
   # run:
   #   desc: run the cmd/tasker application
@@ -45,21 +45,21 @@ tasks:
   #   - tern migrate -m ./internal/database/migrations --conn-string {{.TASKER_DB_DSN}}
 
 
-  go:tidy:
-    desc: format all .go files, and tidy and vendor module dependencies
-    cmds:
-    - echo 'Formatting .go files...'
-    - go fmt ./...
-    - echo 'Tidying module dependencies...'
-    - go mod tidy
-    - echo 'Verifying dependencies...'
-    - go mod verify
+  # go:tidy:
+  #   desc: format all .go files, and tidy and vendor module dependencies
+  #   cmds:
+  #   - echo 'Formatting .go files...'
+  #   - go fmt ./...
+  #   - echo 'Tidying module dependencies...'
+  #   - go mod tidy
+  #   - echo 'Verifying dependencies...'
+  #   - go mod verify
 
-  build:gateway:
-    desc: build api-gateway service
-    cmd: nx build api-gateway
+  # build:gateway:
+  #   desc: build api-gateway service
+  #   cmd: nx build api-gateway
 
-  build:ts:
-    desc: build all typescript services
-    cmd: nx run-many --target=build --all
+  # build:ts:
+  #   desc: build all typescript services
+  #   cmd: nx run-many --target=build --all
 

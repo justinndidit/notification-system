@@ -1,0 +1,73 @@
+
+version: '3'
+
+vars:
+  # IMPORTANT: This DSN must be in the MySQL format for golang-migrate
+  # Example: mysql://user:password@tcp(localhost:3306)/forex
+  FOREX_DB_DSN: '{{.ORCHESTRATOR_DB_DSN | default ""}}'
+
+tasks:
+  help:
+    desc: print this help message
+    cmds:
+    - task --list-all
+    silent: true
+
+  confirm:
+    desc: confirmation prompt
+    cmds:
+    - |
+      echo -n 'Are you sure? [y/N] ' && read ans && [ ${ans:-N} = y ]
+    silent: true
+    internal: true
+
+  run:
+    desc: run the cmd/forex application
+    cmds:
+    - go run ./cmd/orchestrator
+
+  run:dev:
+    desc: run the orchestrator application in watch mode
+    cmds:
+    - air
+
+  # --- MODIFIED TASK ---
+  migrations:new:
+    desc: create a new database migration (e.g., task migrations:new name=create_users)
+    vars:
+      NAME: '{{.name | default ""}}'
+    cmds:
+    - |
+      if [ -z "{{.NAME}}" ]; then
+        echo "Error: name parameter is required"
+        echo "Usage: task migrations:new name=migration_name"
+        exit 1
+      fi
+    - echo 'Creating migration file for {{.NAME}}...'
+    # Use 'migrate create' command
+    - migrate create -ext sql -dir ./internal/database/migrations -seq {{.NAME}}
+
+  # --- MODIFIED TASK ---
+  migrations:up:
+    desc: apply all up database migrations
+    deps: [ confirm ]
+    cmds:
+    - echo 'Running up migrations...'
+    # Use 'migrate' command with database and path
+    - migrate -database "{{.ORCHESTRATOR_DB_DSN}}" -path ./internal/database/migrations up
+
+  migrations:clean:
+    desc: cleans dirty database
+    cmds:
+    - echo 'Cleaning database....'
+    - migrate -database "{{.ORCHESTRATOR_DB_DSN}}"  -path ./internal/database/migrations force 1
+
+  tidy:
+    desc: format all .go files, and tidy and vendor module dependencies
+    cmds:
+    - echo 'Formatting .go files...'
+    - go fmt ./...
+    - echo 'Tidying module dependencies...'
+    - go mod tidy
+    - echo 'Verifying dependencies...'
+    - go mod verify
