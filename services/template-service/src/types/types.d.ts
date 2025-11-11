@@ -34,3 +34,11 @@ declare interface JwtPayload {
 declare interface JwtRequest extends Request {
   user: JwtPayload;
 }
+
+declare interface RenderedMessage {
+  channel: NotificationChannel;
+  subject?: string;
+  html?: string;
+  title?: string;
+  body?: string;
+}
