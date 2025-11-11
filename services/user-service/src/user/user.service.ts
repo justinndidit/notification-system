@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,8 +8,14 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { LoginDto, RegisterDto, UpdatePreferenceDto } from './dto/user.dto';
+import {
+  LoginDto,
+  PaginationDto,
+  RegisterDto,
+  UpdatePreferenceDto,
+} from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
+import { Preference, Prisma, User } from '@prisma/client';
 
 @Injectable()
 export class UserService {
@@ -87,18 +94,46 @@ export class UserService {
   }
 
   //GET ALL USER
-  async getAllUsers() {
-    const users = await this.prisma.user.findMany({
-      include: {
-        preferences: true,
-      },
-    });
+  async getPaginatedUsers(
+    paginationDto: PaginationDto,
+  ): Promise<PaginatedResponse<Omit<User, 'password'>>> {
+    const page = paginationDto.page ?? 1;
+    const limit = paginationDto.limit ?? 10;
+    const skip = (page - 1) * limit;
+    const [total, users] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.user.findMany({
+        include: {
+          preferences: true,
+        },
+        skip,
+        take: limit,
+        orderBy: {
+          created_at: 'desc',
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    const meta: PaginationMeta = {
+      total,
+      limit,
+      page,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_previous: page > 1,
+    };
+
     if (!users) {
       throw new NotFoundException('Users not found');
     }
+    if (users.length === 0 && page > 1) {
+      throw new NotFoundException(`No users found on page ${page}`);
+    }
 
-    const safeUsers = users.map(({ password: _, ...rest }) => rest);
-    return safeUsers;
+    const safeUsers = users.map(({ password, ...user }) => user);
+    return { data: safeUsers, meta };
   }
 
   //GET USER BY ID
@@ -139,13 +174,40 @@ export class UserService {
   }
 
   //GET ALL PREFERENCE
-  async getAllUsersPreference() {
-    const preferences = await this.prisma.preference.findMany();
+  async getPaginatedUserPreferences(
+    paginationDto: PaginationDto,
+  ): Promise<PaginatedResponse<Preference>> {
+    const page = paginationDto.page ?? 1;
+    const limit = paginationDto.limit ?? 10;
+    const skip = (page - 1) * limit;
+    const [total, preferences] = await Promise.all([
+      this.prisma.preference.count(), // Or global if needed
+      this.prisma.preference.findMany({
+        skip,
+        take: limit,
+        orderBy: { updated_at: 'desc' },
+      }),
+    ]);
+
     if (!preferences) {
       throw new NotFoundException('Preferences not found');
     }
 
-    return preferences;
+    if (preferences.length === 0 && page > 1) {
+      throw new NotFoundException(`No users found on page ${page}`);
+    }
+
+    const totalPages = Math.ceil(total / limit);
+    const meta: PaginationMeta = {
+      total,
+      limit,
+      page,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_previous: page > 1,
+    };
+
+    return { data: preferences, meta };
   }
 
   //GET users preference by Ids
@@ -162,5 +224,46 @@ export class UserService {
     }
 
     return user.preferences;
+  }
+
+  //UPDATE PUSH TOKEN
+  async updatePushToken(
+    userId: string,
+    pushToken: WebPushSubscription,
+  ): Promise<{ push_token: WebPushSubscription | null; user_id: string }> {
+    if (
+      !pushToken ||
+      !pushToken.endpoint ||
+      !pushToken.keys?.p256dh ||
+      !pushToken.keys?.auth
+    ) {
+      throw new BadRequestException('Invalid push token structure');
+    }
+
+    // Check uniqueness - Prisma doesn't support direct JSON equality in where clauses
+    // So we serialize and use a raw query to check for duplicates
+    const serializedToken = JSON.stringify(pushToken);
+    const existing = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "User" 
+      WHERE push_token::text = ${serializedToken}::text
+    `;
+
+    if (existing.length > 0 && existing[0].id !== userId) {
+      throw new ConflictException('Push token already in use');
+    }
+
+    // Update - cast WebPushSubscription to Prisma's InputJsonValue type
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        push_token: pushToken as unknown as Prisma.InputJsonValue,
+      },
+      select: { id: true, push_token: true },
+    });
+
+    return {
+      user_id: updated.id,
+      push_token: updated.push_token as WebPushSubscription | null,
+    };
   }
 }

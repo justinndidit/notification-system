@@ -5,6 +5,8 @@ import {
   IsOptional,
   IsBoolean,
   IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 
 export class RegisterDto {
@@ -53,4 +55,17 @@ export class UpdatePreferenceDto {
   @IsOptional()
   @IsString()
   language?: string;
+}
+
+export class PaginationDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100) // Cap to prevent abuse
+  limit?: number = 10;
 }

@@ -5,12 +5,18 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 
-import { RegisterDto, UpdatePreferenceDto } from './dto/user.dto';
+import {
+  LoginDto,
+  PaginationDto,
+  RegisterDto,
+  UpdatePreferenceDto,
+} from './dto/user.dto';
 import { UserService } from './user.service';
 import { JwtAuthGaurd } from './jwt-auth.guard';
 
@@ -25,34 +31,37 @@ export class UserController {
 
   //SIGN IN
   @Get('/signin')
-  signin(@Body() registerDto: RegisterDto) {
+  signin(@Body() registerDto: LoginDto) {
     return this.userService.signin(registerDto);
   }
 
   //GET ALL USERS
   @Get('')
   @UseGuards(JwtAuthGaurd)
-  getAllUsers(@Req() req: JwtRequest) {
+  getAllUsers(@Query() paginationDto: PaginationDto, @Req() req: JwtRequest) {
     const role = req.user.role;
     if (role !== 'admin') {
       throw new UnauthorizedException(
         'Forbidden: You are not authorized to perform this request',
       );
     }
-    return this.userService.getAllUsers();
+    return this.userService.getPaginatedUsers(paginationDto);
   }
 
   //GET ALL PREFERENCE
   @Get('/preference')
   @UseGuards(JwtAuthGaurd)
-  getAllUserPreference(@Param('id') userId: string, @Req() req: JwtRequest) {
+  getAllUserPreference(
+    @Query() paginationDto: PaginationDto,
+    @Req() req: JwtRequest,
+  ) {
     const role = req.user.role;
     if (role !== 'admin') {
       throw new UnauthorizedException(
         'Forbidden: You are not authorized to update this preference',
       );
     }
-    return this.userService.getAllUsersPreference();
+    return this.userService.getPaginatedUserPreferences(paginationDto);
   }
 
   //GET USER BY ID
@@ -81,5 +90,20 @@ export class UserController {
       );
     }
     return this.userService.updatePreference(userId, updateDto);
+  }
+
+  //   update push token
+  @Patch(':id/push-token')
+  @UseGuards(JwtAuthGaurd)
+  async updatePushToken(
+    @Param('id') id: string,
+    @Body('push_token') pushToken: WebPushSubscription,
+    @Req() { user }: JwtRequest,
+  ) {
+    if (user.user_id !== id)
+      throw new UnauthorizedException(
+        'Forbidden, you are not allowed to update this push toke ',
+      );
+    return this.userService.updatePushToken(id, pushToken);
   }
 }
