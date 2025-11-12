@@ -66,12 +66,14 @@ export class UserController {
 
   //GET USER BY ID
   @Get('/:id')
+  @UseGuards(JwtAuthGaurd)
   getUserById(@Param('id') userId: string) {
     return this.userService.getUserById(userId);
   }
 
   //GET USER PREFERENCE BY ID
   @Get('preference/:id')
+  @UseGuards(JwtAuthGaurd)
   getUserPreference(@Param('id') userId: string) {
     return this.userService.getUserPreference(userId);
   }

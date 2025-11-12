@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+  
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum NotificationChannel {
+  EMAIL
+  PUSH
+}
+
+
+
+model User {
+  id             String        @id @default(uuid())
+  name           String
+  email          String        @unique
+  password       String
+  role           String        @default("user")
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+  push_token     Json?   
+  preferences    Preference?
+}
+
+
+model Preference {
+  id                 String  @id @default(uuid())
+  user               User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user_id            String  @unique
+  email_opt_in       Boolean @default(true)
+  push_opt_in        Boolean @default(true)
+  daily_limit        Int     @default(100)
+  language           String  @default("en")
+  updated_at         DateTime @updatedAt
+  created_at         DateTime @default(now())
+}
+
+
+model Template {
+  id          String             @id @default(uuid())
+  name        String             // e.g., "Order Confirmation"
+  event       String      // E-com trigger
+  channel     NotificationChannel[] // EMAIL or PUSH
+  language    String             @default("en")// e.g., 'en', 'fr' (ISO code)
+  isActive    Boolean            @default(true)
+  created_at  DateTime           @default(now())
+  updated_at  DateTime           @updatedAt
+  // Relations
+  versions    TemplateVersion[]  @relation("TemplateVersions")
+  // Optional: owner User? @relation(fields: [user_id], references: [id])
+  // user_id    String?
+
+  @@unique([event, language]) // One active per combo
+  @@index([event, language])
+}
+
+model TemplateVersion {
+  id           String   @id @default(uuid())
+  template     Template @relation("TemplateVersions", fields: [template_id], references: [id], onDelete: Cascade)
+  template_id  String
+  version      Int      @default(1) // Auto-increment per template
+  subject      String?  // For EMAIL only
+  title        String?  // For PUSH only
+  body         String   // Templated content (Handlebars)
+  variables    Json?    // Schema: { "order.id": "string", "user.name": "string" } – for validation/docs
+  created_at   DateTime @default(now())
+
+  @@index([template_id, version]) // Fast latest fetch
+}
