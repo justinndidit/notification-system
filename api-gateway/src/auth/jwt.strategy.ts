@@ -23,6 +23,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   // Validate method is called automatically after verifying the JWT's signature and expiration
   validate(payload: JwtPayload) {
-    return { user_id: payload.user_id, role: payload.role };
+    return {
+      user_id: payload.user_id,
+      userId: payload.user_id,
+      role: payload.role,
+    };
   }
 }

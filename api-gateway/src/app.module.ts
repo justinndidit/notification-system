@@ -4,19 +4,24 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { CustomRedisStorageService } from './throttler/redis-storage.service';
-import Redis from 'ioredis';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
-import config from './config/config';
 import { LoggingInterceptor } from './middleware/logging.interceptor';
 import { ThrottlerStorageModule } from './throttler/throttler-storage.module';
 import { ProxyModule } from './middleware/proxy.module';
-
-const { redisUrl } = config();
+import { NotificationModule } from './notification/notification.module';
+import { AuthModule } from './auth/auth.module';
+import { ResponseInterceptor } from './common/interceptors/response.interceptors';
+import { RedisModule } from './common/redis.module';
+import { Reflector } from '@nestjs/core';
+import { JwtHelper } from './common/jwt-helper';
 
 @Module({
   imports: [
+    RedisModule,
     ProxyModule,
+    AuthModule,
+    NotificationModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRootAsync({
       imports: [ThrottlerStorageModule],
@@ -35,11 +40,10 @@ const { redisUrl } = config();
   controllers: [AppController],
   providers: [
     AppService,
-    {
-      provide: 'REDIS_CLIENT',
-      useFactory: () => new Redis(redisUrl || 'redis://localhost:6379'),
-    },
+    Reflector,
+    JwtHelper,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     CustomRedisStorageService,
     LoggingInterceptor,
   ],
