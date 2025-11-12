@@ -22,7 +22,7 @@ import {
 import type { JwtRequest, RenderedMessage } from 'src/types/types';
 import { NotificationChannel } from '@prisma/client';
 
-@UseGuards(JwtAuthGuard)
+// @UseGuards(JwtAuthGuard)
 @Controller('template')
 export class TemplateController {
   constructor(private readonly templatesService: TemplateService) {}

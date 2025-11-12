@@ -1,0 +1,40 @@
+# Stage 1: Base image
+FROM node:20-alpine AS base
+WORKDIR /usr/src/app
+RUN npm install -g pnpm
+
+# Stage 2: Install dependencies
+FROM base AS deps
+WORKDIR /usr/src/app
+
+# Copy workspace configuration from root
+COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+
+# Copy root package.json if it exists
+COPY package.json ./
+
+# Copy service-specific files
+COPY services/template-service/package.json ./services/template-service/
+COPY services/template-service/prisma ./services/template-service/prisma/
+
+# Install dependencies for the specific service
+RUN pnpm install --filter template-service --frozen-lockfile
+
+# Stage 3: Development
+FROM base AS dev
+WORKDIR /usr/src/app
+
+# Copy installed dependencies
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY --from=deps /usr/src/app/services/template-service/node_modules ./services/template-service/node_modules
+COPY --from=deps /usr/src/app/services/template-service/prisma ./services/template-service/prisma
+
+# Copy the rest of the application
+COPY services/template-service ./services/template-service
+
+# Set working directory to the service
+WORKDIR /usr/src/app/services/template-service
+
+EXPOSE 3003
+CMD ["pnpm", "run", "start:dev"]
