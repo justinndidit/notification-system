@@ -11,12 +11,11 @@ services:
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=postgres
+      - POSTGRES_DB=postgres #default db
     ports:
       - "5432:5432"
     volumes:
       - postgres:/var/lib/postgresql/data
-      # Map the host file to a file in the container
       - ../scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
     networks:
       - backend
@@ -148,94 +147,69 @@ services:
   #     timeout: 10s
   #     retries: 3
 
-  # # User Service (NestJS)
-  # user-service:
-  #   build:
-  #     context: ./services/user-service
-  #     dockerfile: Dockerfile
-  #   container_name: user-service
-  #   restart: unless-stopped
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     NODE_ENV: ${NODE_ENV:-development}
-  #     PORT: 3001
-  #     # Database
-  #     DB_HOST: postgres
-  #     DB_PORT: 5432
-  #     DB_USER: ${DB_USER}
-  #     DB_PASSWORD: ${DB_PASSWORD}
-  #     DB_NAME: user_service_db
-  #     # Or connection string
-  #     DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/user_service_db
-  #     # Redis
-  #     REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-  #     # Service discovery
-  #     CONSUL_HOST: consul
-  #     CONSUL_PORT: 8500
-  #     SERVICE_NAME: user-service
-  #     SERVICE_PORT: 3001
-  #   ports:
-  #     - "3001:3001"
-  #   networks:
-  #     - backend
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     consul:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+  # User Service (NestJS)
+  user-service:
+    build:
+      context: ..
+      dockerfile: services/user-service/Dockerfile.dev
+    container_name: user-service
+    restart: unless-stopped
+    env_file:
+      - ../services/user-service/.env
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3007:3007"
+    volumes:
+      - ../services/user-service/src:/usr/src/app/services/user-service/src
+      - ../services/user-service/prisma:/usr/src/app/services/user-service/prisma
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # consul:
+      #   condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # # Template Service (NestJS)
-  # template-service:
-  #   build:
-  #     context: ./services/template-service
-  #     dockerfile: Dockerfile
-  #   container_name: template-service
-  #   restart: unless-stopped
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     NODE_ENV: ${NODE_ENV:-development}
-  #     PORT: 3003
-  #     # Database
-  #     DB_HOST: postgres
-  #     DB_PORT: 5432
-  #     DB_USER: ${DB_USER}
-  #     DB_PASSWORD: ${DB_PASSWORD}
-  #     DB_NAME: template_service_db
-  #     # Or connection string
-  #     DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/template_service_db
-  #     # Redis
-  #     REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-  #     # Service discovery
-  #     CONSUL_HOST: consul
-  #     CONSUL_PORT: 8500
-  #     SERVICE_NAME: template-service
-  #     SERVICE_PORT: 3003
-  #   ports:
-  #     - "3003:3003"
-  #   networks:
-  #     - backend
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     consul:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-
+  template-service:
+    build:
+      context: ..  # Change this to point to monorepo root
+      dockerfile: services/template-service/Dockerfile.dev
+    container_name: template-service
+    restart: unless-stopped
+    env_file:
+      - ../services/template-service.env
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3003:3003"
+    volumes:
+      - ../services/template-service/src:/usr/src/app/services/template-service/src
+      - ../services/template-service/prisma:/usr/src/app/services/template-service/prisma
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
   # Orchestrator (Golang)
   orchestrator:
     build:
@@ -246,39 +220,39 @@ services:
     env_file:
       - ../services/orchestrator/.env.local
     environment:
-      ORCHESTRATOR_DATABASE.HOST: "postgres"
-      ORCHESTRATOR_DATABASE.PORT: "5432"
-      ORCHESTRATOR_DATABASE.USER: "postgres"
-      ORCHESTRATOR_DATABASE.PASSWORD: "postgres"
-      ORCHESTRATOR_DATABASE.NAME: "notification_db"
-      ORCHESTRATOR_DATABASE.SSL_MODE: "disable"
-      ORCHESTRATOR_DATABASE.MAX_OPEN_CONNS: "25"
-      ORCHESTRATOR_DATABASE.MAX_IDLE_CONNS: "5"
-      ORCHESTRATOR_DATABASE.CONN_MAX_LIFETIME: "300"
-      ORCHESTRATOR_DATABASE.CONN_MAX_IDLE_TIME: "60"
+      ORCHESTRATOR_DATABASE.HOST: ${ORCHESTRATOR_DATABASE.HOST}
+      ORCHESTRATOR_DATABASE.PORT: ${ORCHESTRATOR_DATABASE.PORT}
+      ORCHESTRATOR_DATABASE.USER: ${ORCHESTRATOR_DATABASE.USER}
+      ORCHESTRATOR_DATABASE.PASSWORD: ${ORCHESTRATOR_DATABASE.PASSWORD}
+      ORCHESTRATOR_DATABASE.NAME: ${ORCHESTRATOR_DATABASE.NAME}
+      ORCHESTRATOR_DATABASE.SSL_MODE: ${ORCHESTRATOR_DATABASE.SSL_MODE}
+      ORCHESTRATOR_DATABASE.MAX_OPEN_CONNS: ${ORCHESTRATOR_DATABASE.MAX_OPEN_CONNS}
+      ORCHESTRATOR_DATABASE.MAX_IDLE_CONNS: ${ORCHESTRATOR_DATABASE.MAX_IDLE_CONNS}
+      ORCHESTRATOR_DATABASE.CONN_MAX_LIFETIME: ${ORCHESTRATOR_DATABASE.CONN_MAX_LIFETIME}
+      ORCHESTRATOR_DATABASE.CONN_MAX_IDLE_TIME: ${ORCHESTRATOR_DATABASE.MAX_IDLE_CONNS}
 
       # Redis
-      ORCHESTRATOR_REDIS.ADDRESS: "redis:6379"
-      ORCHESTRATOR_REDIS.PASSWORD: "redis_password"
-      ORCHESTRATOR_REDIS.DB: "0"
+      ORCHESTRATOR_REDIS.ADDRESS: ${ORCHESTRATOR_REDIS.ADDRESS}
+      ORCHESTRATOR_REDIS.PASSWORD: ${ORCHESTRATOR_REDIS.PASSWORD}
+      ORCHESTRATOR_REDIS.DB: ${ORCHESTRATOR_REDIS.DB}
       # RabbitMQ
-      ORCHESTRATOR_RABBITMQ.URL: "amqp://rabbitMQ:rabbitMQ@rabbitmq:5672/"
-      ORCHESTRATOR_RABBITMQ.EXCHANGE_NAME: "notifications"
-      ORCHESTRATOR_RABBITMQ.EXCHANGE_TYPE: "topic"
-      ORCHESTRATOR_RABBITMQ.QUEUE_NAME: "orchestrator_queue"
-      ORCHESTRATOR_RABBITMQ.ROUTING_KEY: "notification.*"
-      ORCHESTRATOR_RABBITMQ.PREFETCH_COUNT: "10"
+      ORCHESTRATOR_RABBITMQ.URL: ${ORCHESTRATOR_RABBITMQ.URL}
+      ORCHESTRATOR_RABBITMQ.EXCHANGE_NAME: ${ORCHESTRATOR_RABBITMQ.EXCHANGE_NAME}
+      ORCHESTRATOR_RABBITMQ.EXCHANGE_TYPE: ${ORCHESTRATOR_RABBITMQ.EXCHANGE_TYPE}
+      ORCHESTRATOR_RABBITMQ.QUEUE_NAME: ${ORCHESTRATOR_RABBITMQ.QUEUE_NAME}
+      ORCHESTRATOR_RABBITMQ.ROUTING_KEY: ${ORCHESTRATOR_RABBITMQ.ROUTING_KEY}
+      ORCHESTRATOR_RABBITMQ.PREFETCH_COUNT: ${ORCHESTRATOR_RABBITMQ.PREFETCH_COUNT}
 
       # Server
-      ORCHESTRATOR_SERVER.PORT: "3002"
-      ORCHESTRATOR_SERVER.READ_TIMEOUT: "30s"
-      ORCHESTRATOR_SERVER.WRITE_TIMEOUT: "30s"
-      ORCHESTRATOR_SERVER.IDLE_TIMEOUT: "120s"
-      ORCHESTRATOR_SERVER.CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001"
+      ORCHESTRATOR_SERVER.PORT: ${ORCHESTRATOR_SERVER.PORT}
+      ORCHESTRATOR_SERVER.READ_TIMEOUT: ${ORCHESTRATOR_SERVER.READ_TIMEOUT}
+      ORCHESTRATOR_SERVER.WRITE_TIMEOUT: ${ORCHESTRATOR_SERVER.WRITE_TIMEOUT}
+      ORCHESTRATOR_SERVER.IDLE_TIMEOUT: ${ORCHESTRATOR_SERVER.IDLE_TIMEOUT}
+      ORCHESTRATOR_SERVER.CORS_ALLOWED_ORIGINS: ${ORCHESTRATOR_SERVER.CORS_ALLOWED_ORIGINS}
 
       # External Services
-      ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS: "http://localhost:3001"
-      ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS: "http://localhost:3003"
+      ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS:  ${ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS}
+      ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS: ${ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS}
     volumes:
       - ../services/orchestrator:/app
     ports:
