@@ -55,6 +55,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // Don't send response if headers have already been sent (e.g., by proxy)
+    if (response.headersSent) {
+      return;
+    }
+
     const status =
       exception instanceof HttpException ? exception.getStatus() : 500;
 
