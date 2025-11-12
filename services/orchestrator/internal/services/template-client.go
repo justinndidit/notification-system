@@ -24,7 +24,7 @@ func NewTemplateClient(logger *zerolog.Logger, address string) *TemplateClient {
 func (t *TemplateClient) FetchTemplateById(ctx context.Context, id string, wg *sync.WaitGroup, resultChan chan<- dtos.HTTPResponse) {
 	defer wg.Done()
 
-	url := fmt.Sprintf("%s/templates/%s", t.clientAddress, id)
+	url := fmt.Sprintf("%s/template/%s", t.clientAddress, id)
 
 	t.baseClient.DoWithRetry(ctx, url, resultChan, "Failed to fetch template")
 }

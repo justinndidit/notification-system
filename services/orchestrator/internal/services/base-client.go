@@ -32,9 +32,9 @@ func NewBaseHTTPClient(logger *zerolog.Logger) *BaseHTTPClient {
 }
 
 // Shared retry logic
+// BaseHTTPClient
 func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan chan<- dtos.HTTPResponse, errorMsg string) {
-
-	var body dtos.HTTPResponse
+	var body dtos.HTTPResponse // ✅ Decode into HTTPResponse directly
 
 	operation := func() error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -48,6 +48,7 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		}
 		defer resp.Body.Close()
 
+		// Decode the full HTTPResponse
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return err
 		}
@@ -78,5 +79,6 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		return
 	}
 
+	// Send the decoded response
 	resultChan <- body
 }

@@ -24,7 +24,7 @@ func NewUserClient(logger *zerolog.Logger, address string) *UserClient {
 func (u *UserClient) FetchUserPreference(ctx context.Context, id string, wg *sync.WaitGroup, resultChan chan<- dtos.HTTPResponse) {
 	defer wg.Done()
 
-	url := fmt.Sprintf("%s/users/%s/preferences", u.userAddress, id)
+	url := fmt.Sprintf("%s/users/preference/%s", u.userAddress, id)
 
 	u.baseClient.DoWithRetry(ctx, url, resultChan, "Failed to fetch user preferences")
 

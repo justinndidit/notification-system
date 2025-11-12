@@ -14,7 +14,7 @@ func NewLogger(serviceName string) zerolog.Logger {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
 	logger := zerolog.New(consoleWriter).
-		Level(zerolog.WarnLevel).
+		Level(zerolog.InfoLevel).
 		With().
 		Timestamp().
 		Str("service", serviceName).
