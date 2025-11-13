@@ -1,0 +1,1 @@
+﻿{"notification_type":"email","user_id":"test-user-123","template_code":"welcome","variables":{"name":"John Doe","subject":"Welcome to Our Platform!","link":"https://example.com/verify"},"request_id":"req-test-001","priority":10,"metadata":{}}
