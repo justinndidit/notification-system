@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  rabbitmq:
+    image: rabbitmq:3.11-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      # RABBITMQ_VM_MEMORY_HIGH_WATERMARK: 256MB
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # management UI
+
+  email_service:
+    build: .
+    command: ["sh", "-c", "celery -A email_service worker --loglevel=info --concurrency=4"]
+    depends_on:
+      - rabbitmq
+    environment:
+      - DJANGO_SETTINGS_MODULE=email_service.settings
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      # - TEMPLATE_SERVICE_URL=http://template-service:8000
+      # - STATUS_CALLBACK_URL=http://api-gateway:8000/api/v1/notifications/status/
+      - EMAIL_HOST=smtp.gmail.com
+      - EMAIL_PORT=587
+      - EMAIL_HOST_USER=abasiofon135@gmail.com
+      - EMAIL_HOST_PASSWORD=yiyr kphc psyc dcyu
+      - EMAIL_FROM=noreply@example.com
+    volumes:
+      - .:/app
