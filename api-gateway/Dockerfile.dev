@@ -1,0 +1,40 @@
+# Stage 1: Base image
+FROM node:20-alpine AS base
+WORKDIR /usr/src/app
+RUN npm install -g pnpm
+
+# Stage 2: Install dependencies
+FROM base AS deps
+WORKDIR /usr/src/app
+
+# Copy workspace configuration from root
+COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+
+# Copy root package.json if it exists
+COPY package.json ./
+
+# Copy api-gateway specific files
+COPY api-gateway/package.json ./api-gateway/
+
+# Install dependencies for the api-gateway
+RUN pnpm install --filter api-gateway --frozen-lockfile
+
+# Stage 3: Development
+FROM base AS dev
+WORKDIR /usr/src/app
+
+# Copy installed dependencies
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+COPY --from=deps /usr/src/app/api-gateway/node_modules ./api-gateway/node_modules
+
+# Copy the rest of the application
+COPY api-gateway ./api-gateway
+
+# Set working directory to the api-gateway
+WORKDIR /usr/src/app/api-gateway
+
+EXPOSE 8000
+
+# Start the application
+CMD ["pnpm", "run", "start:dev"]

@@ -37,4 +37,4 @@ COPY services/user-service ./services/user-service
 WORKDIR /usr/src/app/services/user-service
 
 EXPOSE 3007
-CMD ["pnpm", "run", "start:dev"]
+CMD ["sh", "-c", "npx prisma migrate deploy && pnpm run start:dev"]

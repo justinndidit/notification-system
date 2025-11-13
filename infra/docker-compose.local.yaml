@@ -1,0 +1,373 @@
+name: notification-system
+
+services:
+  # ==================== Infrastructure Services ====================
+
+  postgres:
+    container_name: postgres
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-postgres}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --save 20 1 --loglevel warning ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ==================== Application Services ====================
+  # User Service (NestJS)
+  user-service:
+    build:
+      context: ..
+      dockerfile: services/user-service/Dockerfile.dev
+    container_name: user-service
+    restart: unless-stopped
+    environment:
+      # Server
+      PORT: 3007
+      NODE_ENV: development
+
+      # Database
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/user_service_db
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 24h
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+    ports:
+      - "3007:3007"
+    volumes:
+      - ../services/user-service/src:/usr/src/app/services/user-service/src
+      - ../services/user-service/prisma:/usr/src/app/services/user-service/prisma
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Template Service (NestJS)
+  template-service:
+    build:
+      context: ..
+      dockerfile: services/template-service/Dockerfile.dev
+    container_name: template-service
+    restart: unless-stopped
+    environment:
+      # Server
+      PORT: 3003
+      NODE_ENV: development
+
+      # Database
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/template_service_db
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 24h
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+    ports:
+      - "3003:3003"
+    volumes:
+      - ../services/template-service/src:/usr/src/app/services/template-service/src
+      - ../services/template-service/prisma:/usr/src/app/services/template-service/prisma
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Orchestrator Service (Go)
+  orchestrator:
+    build:
+      context: ../services/orchestrator
+      dockerfile: Dockerfile.dev
+    container_name: orchestrator
+    restart: unless-stopped
+    environment:
+      # Database
+      ORCHESTRATOR_DATABASE.HOST: postgres
+      ORCHESTRATOR_DATABASE.PORT: 5432
+      ORCHESTRATOR_DATABASE.USER: ${DB_USER:-postgres}
+      ORCHESTRATOR_DATABASE.PASSWORD: ${DB_PASSWORD:-postgres}
+      ORCHESTRATOR_DATABASE.NAME: notification_db
+      ORCHESTRATOR_DATABASE.SSL_MODE: disable
+      ORCHESTRATOR_DATABASE.MAX_OPEN_CONNS: 25
+      ORCHESTRATOR_DATABASE.MAX_IDLE_CONNS: 5
+      ORCHESTRATOR_DATABASE.CONN_MAX_LIFETIME: 5
+      ORCHESTRATOR_DATABASE.CONN_MAX_IDLE_TIME: 5
+
+      # Redis
+      ORCHESTRATOR_REDIS.ADDRESS: redis:6379
+      ORCHESTRATOR_REDIS.PASSWORD: ${REDIS_PASSWORD:-}
+      ORCHESTRATOR_REDIS.DB: 0
+
+      # RabbitMQ
+      ORCHESTRATOR_RABBITMQ.URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/
+      ORCHESTRATOR_RABBITMQ.EXCHANGE_NAME: notifications
+      ORCHESTRATOR_RABBITMQ.EXCHANGE_TYPE: topic
+      ORCHESTRATOR_RABBITMQ.QUEUE_NAME: push_notifications
+      ORCHESTRATOR_RABBITMQ.ROUTING_KEY: notification.push
+      ORCHESTRATOR_RABBITMQ.PREFETCH_COUNT: 10
+
+      # Server
+      ORCHESTRATOR_SERVER.PORT: 8080
+      ORCHESTRATOR_SERVER.READ_TIMEOUT: 15s
+      ORCHESTRATOR_SERVER.WRITE_TIMEOUT: 15s
+      ORCHESTRATOR_SERVER.IDLE_TIMEOUT: 60s
+      ORCHESTRATOR_SERVER.CORS_ALLOWED_ORIGINS: "*"
+
+      # External Services
+      ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS: http://user-service:3007
+      ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS: http://template-service:3003
+
+    ports:
+      - "3002:8080"
+    volumes:
+      - ../services/orchestrator:/app
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      template-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # Push Service (Go)
+  push-service:
+    build:
+      context: ../services/push-service
+      dockerfile: Dockerfile.dev
+    container_name: push-service
+    restart: unless-stopped
+
+    # --- FIX 1: Corrected '.env_file' to 'env_file' ---
+    env_file:
+      - ../services/push-service/.env
+
+    environment:
+      # Service
+      SERVICE_NAME: "push-service"
+      PORT: "8080"
+      ENVIRONMENT: "development"
+      LOG_LEVEL: "info"
+
+      # RabbitMQ - This pattern is GREAT.
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      RABBITMQ_QUEUE: "push_notifications"
+      RABBITMQ_EXCHANGE: "notifications"
+      # --- FIX 2: Quoted numeric values ---
+      RABBITMQ_PREFETCH: "10"
+      RABBITMQ_RECONNECT: "true"
+
+      # FCM (Firebase Cloud Messaging)
+      FCM_SERVER_KEY: "${FCM_SERVER_KEY:-}" # Loads from .env
+      FCM_ENABLED: "true"
+      FCM_MAX_RETRIES: "3"
+      FCM_BATCH_SIZE: "500"
+
+      # APNS (Apple Push Notifications)
+      APNS_ENABLED: "false"
+
+      # Redis
+      REDIS_URL: "redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}" # Loads from .env
+      REDIS_DB: "0"
+
+    ports:
+      - "8081:8081"
+    volumes:
+      - ../services/push-service:/app
+      # Add this line if you have a node_modules or vendor folder
+      # - /app/node_modules
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # API Gateway (NestJS)
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: api-gateway/Dockerfile.dev
+    container_name: api-gateway
+    restart: unless-stopped
+    environment:
+      # Server
+      PORT: 8000
+      NODE_ENV: development
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 24h
+      REFRESH_TOKEN_EXPIRATION: 7d
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_password
+      REDIS_DB: 0
+      REDIS_URL: redis://:redis_password@redis:6379/0
+
+      # Rate Limiting
+      THROTTLE_TTL: 60
+      THROTTLE_LIMIT: 60
+
+      # Service URLs
+      USER_SERVICE_URL: http://user-service:3007
+      TEMPLATE_SERVICE_URL: http://template-service:3003
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      PUSH_SERVICE_URL: http://push-service:8081
+
+      # CORS
+      CORS_ORIGIN: "*"
+      CORS_CREDENTIALS: "true"
+
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../api-gateway/src:/usr/src/app/api-gateway/src
+    networks:
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      template-service:
+        condition: service_started
+      orchestrator:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ==================== Admin/Monitoring Services ====================
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  pgadmin_data:
+    driver: local

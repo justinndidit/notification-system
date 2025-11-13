@@ -17,9 +17,16 @@ type PushService struct {
 }
 
 func NewPushService(cfg *Config, log *zerolog.Logger) (*PushService, error) {
-	var fcmClient FCMClient
+	var fcmClient *FCMClient
+	var err error
+
 	if cfg.FCM.Enabled {
-		fcmClient = *NewFCMClient(&cfg.FCM, log)
+		fcmClient, err = NewFCMClient(&cfg.FCM, log)
+
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to initialize fcm client")
+			return nil, err
+		}
 	}
 
 	redisStorage, err := NewRedisStorage(&cfg.Redis, log)
@@ -28,7 +35,7 @@ func NewPushService(cfg *Config, log *zerolog.Logger) (*PushService, error) {
 	}
 
 	return &PushService{
-		fcmClient: &fcmClient,
+		fcmClient: fcmClient,
 		storage:   redisStorage,
 		logger:    log,
 		config:    cfg,
