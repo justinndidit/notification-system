@@ -7,20 +7,18 @@ import (
 	"syscall"
 	"time"
 
-	"push-service/internal/app"
-	"push-service/internal/config"
-	"push-service/internal/logger"
+	"github.com/justinndidit/notificationSystem/push-service/internal"
 )
 
 func main() {
 	// Initialize logger
-	log := logger.New()
-	log.Info("Starting Push Notification Service...")
+	log := internal.NewLogger("push-service")
+	log.Info().Msg("Starting Push Notification Service...")
 
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := internal.Load()
 	if err != nil {
-		log.Fatal("Failed to load configuration", "error", err)
+		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
 	// Create context that listens for termination signals
@@ -28,15 +26,15 @@ func main() {
 	defer cancel()
 
 	// Initialize and start the application
-	application, err := app.New(cfg, log)
+	application, err := internal.NewApp(cfg, &log)
 	if err != nil {
-		log.Fatal("Failed to initialize application", "error", err)
+		log.Fatal().Err(err).Msg("Failed to initialize application")
 	}
 
 	// Start the push service in a goroutine
 	go func() {
 		if err := application.Start(ctx); err != nil {
-			log.Error("Application error", "error", err)
+			log.Error().Err(err).Msg("Application error")
 			cancel()
 		}
 	}()
@@ -46,15 +44,15 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 	<-sigChan
-	log.Info("Shutdown signal received, gracefully shutting down...")
+	log.Info().Msg("Shutdown signal received, gracefully shutting down...")
 
 	// Give services time to cleanup
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := application.Shutdown(shutdownCtx); err != nil {
-		log.Error("Error during shutdown", "error", err)
+		log.Error().Err(err).Msg("Error during shutdown")
 	}
 
-	log.Info("Push service stopped")
+	log.Info().Msg("Push service stopped")
 }

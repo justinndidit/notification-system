@@ -4,27 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"time"
 
-	"push-service/internal/config"
-	"push-service/internal/logger"
-	"push-service/internal/models"
-
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/rs/zerolog"
 )
 
 type Consumer struct {
 	conn           *amqp.Connection
 	channel        *amqp.Channel
-	config         *config.RabbitMQConfig
-	logger         *logger.Logger
+	config         *RabbitMQConfig
+	logger         *zerolog.Logger
 	messageHandler MessageHandler
 	done           chan bool
 }
 
-type MessageHandler func(ctx context.Context, msg *models.PushNotificationMessage) error
+type MessageHandler func(ctx context.Context, msg *PushNotificationMessage) error
 
-func NewConsumer(cfg *config.RabbitMQConfig, log *logger.Logger, handler MessageHandler) (*Consumer, error) {
+func NewConsumer(cfg *RabbitMQConfig, log *zerolog.Logger, handler MessageHandler) (*Consumer, error) {
 	c := &Consumer{
 		config:         cfg,
 		logger:         log,
@@ -42,7 +40,7 @@ func NewConsumer(cfg *config.RabbitMQConfig, log *logger.Logger, handler Message
 func (c *Consumer) connect() error {
 	var err error
 
-	c.logger.Info("Connecting to RabbitMQ", "url", c.config.URL)
+	c.logger.Info().Str("url", c.config.URL).Msg("Connecting to RabbitMQ")
 
 	c.conn, err = amqp.Dial(c.config.URL)
 	if err != nil {
@@ -77,7 +75,7 @@ func (c *Consumer) connect() error {
 		return fmt.Errorf("failed to declare queue: %w", err)
 	}
 
-	c.logger.Info("Successfully connected to RabbitMQ", "queue", c.config.Queue)
+	c.logger.Info().Str("queue", c.config.Queue).Msg("Successfully connected to RabbitMQ")
 	return nil
 }
 
@@ -95,27 +93,27 @@ func (c *Consumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to register consumer: %w", err)
 	}
 
-	c.logger.Info("Push service consumer started, waiting for messages...")
+	c.logger.Info().Msg("Push service consumer started, waiting for messages...")
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				c.logger.Info("Consumer context cancelled, stopping...")
+				c.logger.Info().Msg("Consumer context cancelled, stopping...")
 				c.done <- true
 				return
 			case msg, ok := <-msgs:
 				if !ok {
-					c.logger.Warn("Message channel closed, attempting to reconnect...")
+					c.logger.Warn().Msg("Message channel closed, attempting to reconnect...")
 					if c.config.Reconnect {
 						if err := c.reconnect(ctx); err != nil {
-							c.logger.Error("Failed to reconnect", "error", err)
+							c.logger.Error().Err(err).Msg("Failed to reconnect")
 							c.done <- true
 							return
 						}
 						// Restart consumption after reconnection
 						if err := c.Start(ctx); err != nil {
-							c.logger.Error("Failed to restart consumer", "error", err)
+							c.logger.Error().Err(err).Msg("Failed to restart consumer")
 							c.done <- true
 							return
 						}
@@ -133,17 +131,16 @@ func (c *Consumer) Start(ctx context.Context) error {
 }
 
 func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
-	startTime := time.Now()
+	// startTime := time.Now()
 
-	c.logger.Info("Received push notification message",
-		"message_id", delivery.MessageId,
-		"delivery_tag", delivery.DeliveryTag)
+	c.logger.Info().
+		Str("message_id", delivery.MessageId).
+		// Str("delivery_tag", string(delivery.DeliveryTag)).
+		Msg("Received push notification message")
 
-	var message models.PushNotificationMessage
+	var message PushNotificationMessage
 	if err := json.Unmarshal(delivery.Body, &message); err != nil {
-		c.logger.Error("Failed to unmarshal message",
-			"error", err,
-			"body", string(delivery.Body))
+		c.logger.Error().Err(err).Str("body", string(delivery.Body)).Msg("Failed to unmarshal message")
 
 		// Reject and don't requeue malformed messages
 		delivery.Nack(false, false)
@@ -152,10 +149,9 @@ func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
 
 	// Process the message
 	if err := c.messageHandler(ctx, &message); err != nil {
-		c.logger.Error("Failed to process message",
-			"notification_id", message.NotificationID,
-			"error", err,
-			"duration", time.Since(startTime))
+		c.logger.Error().Err(err).Str("notification_id", message.NotificationID).
+			// Str("duration", string(time.Since(startTime))).
+			Msg("Failed to process message")
 
 		// Requeue the message for retry
 		delivery.Nack(false, true)
@@ -164,16 +160,16 @@ func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
 
 	// Acknowledge successful processing
 	if err := delivery.Ack(false); err != nil {
-		c.logger.Error("Failed to acknowledge message", "error", err)
+		c.logger.Error().Err(err).Discard().Msg("Failed to acknowledge message")
 	}
 
-	c.logger.Info("Message processed successfully",
-		"notification_id", message.NotificationID,
-		"duration", time.Since(startTime))
+	c.logger.Info().Str("notification_id", message.NotificationID).
+		// Str("duration", string(time.Since(startTime))).
+		Msg("Message processed successfully")
 }
 
 func (c *Consumer) reconnect(ctx context.Context) error {
-	c.logger.Info("Attempting to reconnect to RabbitMQ...")
+	c.logger.Info().Msg("Attempting to reconnect to RabbitMQ...")
 
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
@@ -184,16 +180,16 @@ func (c *Consumer) reconnect(ctx context.Context) error {
 		}
 
 		if err := c.connect(); err != nil {
-			c.logger.Warn("Reconnection attempt failed",
-				"attempt", i+1,
-				"max_retries", maxRetries,
-				"error", err)
+			c.logger.Warn().Err(err).
+				// Str("err", string(i+1)).
+				// Str("max_retries", string(maxRetries)).
+				Msg("Reconnection attempt failed")
 
 			time.Sleep(time.Duration(i+1) * 2 * time.Second)
 			continue
 		}
 
-		c.logger.Info("Successfully reconnected to RabbitMQ")
+		c.logger.Info().Msg("Successfully reconnected to RabbitMQ")
 		return nil
 	}
 
@@ -201,17 +197,17 @@ func (c *Consumer) reconnect(ctx context.Context) error {
 }
 
 func (c *Consumer) Close() error {
-	c.logger.Info("Closing RabbitMQ connection...")
+	c.logger.Info().Msg("Closing RabbitMQ connection...")
 
 	if c.channel != nil {
 		if err := c.channel.Close(); err != nil {
-			c.logger.Error("Error closing channel", "error", err)
+			c.logger.Error().Err(err).Msg("Error closing channel")
 		}
 	}
 
 	if c.conn != nil {
 		if err := c.conn.Close(); err != nil {
-			c.logger.Error("Error closing connection", "error", err)
+			c.logger.Error().Err(err).Msg("Error closing connection")
 			return err
 		}
 	}

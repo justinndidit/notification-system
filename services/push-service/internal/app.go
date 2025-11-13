@@ -4,23 +4,21 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"push-service/internal/models"
 
-	"github.com/justinndidit/notificationSystem/orchestrator/internal/config"
 	"github.com/rs/zerolog"
 )
 
 type App struct {
 	config      *Config
 	logger      *zerolog.Logger
-	pushService *service.PushService
-	consumer    *rabbitmq.Consumer
+	pushService *PushService
+	consumer    *Consumer
 	httpServer  *http.Server
 }
 
-func New(cfg *config.Config, log *zerolog.Logger) (*App, error) {
+func NewApp(cfg *Config, log *zerolog.Logger) (*App, error) {
 	// Initialize push service
-	pushService, err := service.NewPushService(cfg, log)
+	pushService, err := NewPushService(cfg, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create push service: %w", err)
 	}
@@ -32,7 +30,7 @@ func New(cfg *config.Config, log *zerolog.Logger) (*App, error) {
 	}
 
 	// Initialize RabbitMQ consumer
-	consumer, err := rabbitmq.NewConsumer(&cfg.RabbitMQ, log, app.handleNotification)
+	consumer, err := NewConsumer(&cfg.RabbitMQ, log, app.handleNotification)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create RabbitMQ consumer: %w", err)
 	}
@@ -44,7 +42,7 @@ func New(cfg *config.Config, log *zerolog.Logger) (*App, error) {
 	return app, nil
 }
 
-func (a *App) handleNotification(ctx context.Context, msg *models.PushNotificationMessage) error {
+func (a *App) handleNotification(ctx context.Context, msg *PushNotificationMessage) error {
 	return a.pushService.ProcessNotification(ctx, msg)
 }
 
@@ -75,9 +73,10 @@ func (a *App) setupHTTPServer() {
 
 		status, err := a.pushService.GetDeliveryStatus(r.Context(), notificationID)
 		if err != nil {
-			a.logger.Error("Failed to get delivery status",
-				"notification_id", notificationID,
-				"error", err)
+			a.logger.Error().Err(err).
+				Str("notification_id", notificationID).
+				Msg("Failed to get delivery status")
+
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -99,41 +98,44 @@ func (a *App) setupHTTPServer() {
 func (a *App) Start(ctx context.Context) error {
 	// Start HTTP server in background
 	go func() {
-		a.logger.Info("Starting HTTP server", "port", a.config.Service.Port)
+		a.logger.Info().
+			Str("port", a.config.Service.Port).
+			Msg("Starting HTTP server")
+
 		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.logger.Error("HTTP server error", "error", err)
+			a.logger.Error().Err(err).Msg("HTTP server error")
 		}
 	}()
 
 	// Start consuming messages (blocking)
-	a.logger.Info("Starting RabbitMQ consumer...")
+	a.logger.Info().Msg("Starting RabbitMQ consumer...")
 	return a.consumer.Start(ctx)
 }
 
 func (a *App) Shutdown(ctx context.Context) error {
-	a.logger.Info("Shutting down application...")
+	a.logger.Info().Msg("Shutting down application...")
 
 	// Shutdown HTTP server
 	if a.httpServer != nil {
 		if err := a.httpServer.Shutdown(ctx); err != nil {
-			a.logger.Error("Error shutting down HTTP server", "error", err)
+			a.logger.Error().Err(err).Msg("Error shutting down HTTP server")
 		}
 	}
 
 	// Close RabbitMQ consumer
 	if a.consumer != nil {
 		if err := a.consumer.Close(); err != nil {
-			a.logger.Error("Error closing RabbitMQ consumer", "error", err)
+			a.logger.Error().Err(err).Msg("Error closing RabbitMQ consumer")
 		}
 	}
 
 	// Close push service
 	if a.pushService != nil {
 		if err := a.pushService.Close(); err != nil {
-			a.logger.Error("Error closing push service", "error", err)
+			a.logger.Error().Err(err).Msg("Error closing push service")
 		}
 	}
 
-	a.logger.Info("Application shutdown complete")
+	a.logger.Info().Msg("Application shutdown complete")
 	return nil
 }

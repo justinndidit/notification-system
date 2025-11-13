@@ -30,10 +30,12 @@ type RabbitMQConfig struct {
 }
 
 type FCMConfig struct {
-	ServerKey  string
-	Enabled    bool
-	MaxRetries int
-	BatchSize  int
+	// FCM v1 API Configuration
+	ProjectID          string
+	ServiceAccountJSON string // JSON content of service account file
+	ServiceAccountPath string // Path to service account file
+	Enabled            bool
+	MaxRetries         int
 }
 
 type APNSConfig struct {
@@ -67,10 +69,11 @@ func Load() (*Config, error) {
 			Reconnect: getEnvAsBool("RABBITMQ_RECONNECT", true),
 		},
 		FCM: FCMConfig{
-			ServerKey:  getEnv("FCM_SERVER_KEY", ""),
-			Enabled:    getEnvAsBool("FCM_ENABLED", true),
-			MaxRetries: getEnvAsInt("FCM_MAX_RETRIES", 3),
-			BatchSize:  getEnvAsInt("FCM_BATCH_SIZE", 500),
+			ProjectID:          getEnv("FCM_PROJECT_ID", ""),
+			ServiceAccountJSON: getEnv("FCM_SERVICE_ACCOUNT_JSON", ""),
+			ServiceAccountPath: getEnv("FCM_SERVICE_ACCOUNT_PATH", ""),
+			Enabled:            getEnvAsBool("FCM_ENABLED", true),
+			MaxRetries:         getEnvAsInt("FCM_MAX_RETRIES", 3),
 		},
 		APNS: APNSConfig{
 			KeyID:      getEnv("APNS_KEY_ID", ""),
@@ -92,8 +95,23 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("RABBITMQ_URL is required")
 	}
 
-	if cfg.FCM.Enabled && cfg.FCM.ServerKey == "" {
-		return nil, fmt.Errorf("FCM_SERVER_KEY is required when FCM is enabled")
+	// Load service account JSON from file if path is provided
+	if cfg.FCM.Enabled {
+		if cfg.FCM.ServiceAccountJSON == "" && cfg.FCM.ServiceAccountPath != "" {
+			content, err := os.ReadFile(cfg.FCM.ServiceAccountPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read FCM service account file: %w", err)
+			}
+			cfg.FCM.ServiceAccountJSON = string(content)
+		}
+
+		if cfg.FCM.ServiceAccountJSON == "" {
+			return nil, fmt.Errorf("FCM_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_PATH is required when FCM is enabled")
+		}
+
+		if cfg.FCM.ProjectID == "" {
+			return nil, fmt.Errorf("FCM_PROJECT_ID is required when FCM is enabled")
+		}
 	}
 
 	return cfg, nil
