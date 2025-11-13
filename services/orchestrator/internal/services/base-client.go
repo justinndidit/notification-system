@@ -54,7 +54,7 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		}
 
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return backoff.Permanent(fmt.Errorf("client error: %d", resp.StatusCode))
+			return backoff.Permanent(fmt.Errorf("client error: %d, %v", resp.StatusCode, resp.Status))
 		}
 
 		if resp.StatusCode != http.StatusOK {

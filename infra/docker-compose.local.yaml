@@ -119,7 +119,7 @@ services:
       NODE_ENV: development
 
       # Database
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/template_service_db
+      DATABASE_URL: postgresql://neondb_owner:npg_DGBJN2nmdA1u@ep-divine-dawn-ahyoyjq0-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require #postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/template_service_db
 
       # JWT
       JWT_SECRET: ${JWT_SECRET}
@@ -309,7 +309,7 @@ services:
       # Service URLs
       USER_SERVICE_URL: http://user-service:3007
       TEMPLATE_SERVICE_URL: http://template-service:3003
-      ORCHESTRATOR_URL: http://orchestrator:8080
+      ORCHESTRATOR_SERVICE_URL: http://orchestrator:8080
       PUSH_SERVICE_URL: http://push-service:8081
 
       # CORS

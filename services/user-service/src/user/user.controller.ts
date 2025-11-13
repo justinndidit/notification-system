@@ -73,7 +73,7 @@ export class UserController {
 
   //GET USER PREFERENCE BY ID
   @Get('preference/:id')
-  @UseGuards(JwtAuthGaurd)
+  // @UseGuards(JwtAuthGaurd)
   getUserPreference(@Param('id') userId: string) {
     return this.userService.getUserPreference(userId);
   }
