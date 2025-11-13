@@ -43,8 +43,6 @@ export class ProxyMiddleware implements NestMiddleware {
         target: targetUrl,
         changeOrigin: true,
         proxyReqPathResolver: (req: Request) => {
-          // Keep the full path including the prefix - don't strip it
-          // The user-service expects paths like /user/signin, not just /signin
           const path = req.originalUrl || req.url || '';
           this.logger.debug(`Proxying to path: ${path}`);
           return path;

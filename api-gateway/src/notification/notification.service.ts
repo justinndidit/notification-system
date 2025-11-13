@@ -14,31 +14,6 @@ import {
   NotificationChannel,
 } from './dto/create-notification.dto';
 
-interface UserPreferences {
-  email_opt_in: boolean;
-  push_opt_in: boolean;
-  daily_limit: number;
-  language: string;
-}
-
-interface RenderedMessage {
-  channel: 'EMAIL' | 'PUSH';
-  subject?: string;
-  html?: string;
-  title?: string;
-  body?: string;
-}
-
-export interface NotificationStatus {
-  id: string;
-  userId: string;
-  event: string;
-  channels: NotificationChannel[];
-  status: 'pending' | 'queued' | 'processing' | 'sent' | 'failed';
-  createdAt: string;
-  updatedAt: string;
-}
-
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);

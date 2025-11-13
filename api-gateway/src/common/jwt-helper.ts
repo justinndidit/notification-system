@@ -17,21 +17,10 @@ export class JwtHelper {
         return null;
       }
 
-      // Warn if using default placeholder secret
-      if (
-        secret === 'your-secret' ||
-        secret === 'secret' ||
-        secret.length < 10
-      ) {
-        this.logger.warn(
-          'JWT_SECRET appears to be a placeholder. Please set a proper secret that matches your user-service.',
-        );
-      }
-
       const decoded = jwt.verify(token, secret) as JwtPayload;
-      this.logger.debug(
-        `Token validated successfully for user: ${decoded.user_id}`,
-      );
+      //   this.logger.debug(
+      //     `Token validated successfully for user: ${decoded.user_id}`,
+      //   );
       return decoded;
     } catch (error) {
       const errorMessage =

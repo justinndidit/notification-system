@@ -12,10 +12,14 @@ const { port, userServiceUrl, orchestratorUrl, templateServiceUrl, redisUrl } =
   config();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
   // Enable CORS
-  app.enableCors();
+  app.enableCors({
+    origin: 'http://localhost:3000', // Allowed origins
+    credentials: true,
+  });
 
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
@@ -67,6 +71,11 @@ async function bootstrap() {
       target: templateServiceUrl,
       requireAuth: () => true, // all template routes require authentication
     },
+    {
+      path: '/orchestrator',
+      target: orchestratorUrl,
+      requireAuth: () => false, // all orchestrator routes require authentication
+    },
   ];
 
   // Register proxy routes
@@ -75,10 +84,10 @@ async function bootstrap() {
       // Validate JWT token and set user if present (for authenticated routes)
       const userReq = req as unknown as UserRequest;
       const token = jwtHelper.extractTokenFromRequest(req);
-      console.log(`[JWT] Token extracted: ${token ? 'Yes' : 'No'}, Headers:`, {
-        authorization: req.headers.authorization,
-        Authorization: req.headers['Authorization'],
-      });
+      //   console.log(`[JWT] Token extracted: ${token ? 'Yes' : 'No'}, Headers:`, {
+      //     authorization: req.headers.authorization,
+      //     Authorization: req.headers['Authorization'],
+      //   });
       if (token) {
         const payload = jwtHelper.validateToken(token);
         console.log(
@@ -86,11 +95,11 @@ async function bootstrap() {
           payload ? 'Valid' : 'Invalid',
         );
         if (payload) {
-          console.log(`[JWT] Setting user:`, payload);
+          //   console.log(`[JWT] Setting user:`, payload);
           userReq.user = {
             userId: payload.user_id,
           };
-          console.log(`[JWT] User set, verifying:`, userReq.user);
+          //   console.log(`[JWT] User set, verifying:`, userReq.user);
         } else {
           console.log(
             `[JWT] Token validation failed - token might be invalid or expired`,
