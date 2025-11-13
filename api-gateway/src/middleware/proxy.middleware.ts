@@ -4,6 +4,12 @@ import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import proxy from 'express-http-proxy';
 import { Request, Response, NextFunction } from 'express';
 
+type ProxyOptions = {
+  extraHeaders?:
+    | Record<string, string>
+    | ((req: UserRequest) => Record<string, string>);
+};
+
 @Injectable()
 export class ProxyMiddleware implements NestMiddleware {
   private readonly logger = new Logger(ProxyMiddleware.name);
@@ -15,6 +21,7 @@ export class ProxyMiddleware implements NestMiddleware {
       targetUrl: string,
       pathPrefix: string,
       addUserHeader = false,
+      options?: ProxyOptions,
     ) => {
       // Check if this request should be proxied using originalUrl
       const originalUrl = (req as unknown as Request).originalUrl || req.url;
@@ -84,6 +91,20 @@ export class ProxyMiddleware implements NestMiddleware {
           }
           if (addUserHeader && srcReq.user) {
             proxyReqOpts.headers['x-user-id'] = srcReq.user.userId;
+          }
+          const extraHeaders =
+            typeof options?.extraHeaders === 'function'
+              ? options.extraHeaders(srcReq)
+              : options?.extraHeaders;
+          if (extraHeaders) {
+            Object.entries(extraHeaders).forEach(([headerKey, headerValue]) => {
+              if (
+                typeof headerValue === 'string' &&
+                headerValue.trim().length > 0
+              ) {
+                proxyReqOpts.headers![headerKey] = headerValue;
+              }
+            });
           }
           return proxyReqOpts;
         },

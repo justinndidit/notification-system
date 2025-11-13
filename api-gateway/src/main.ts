@@ -7,6 +7,7 @@ import { LoggingInterceptor } from './middleware/logging.interceptor';
 import { ProxyMiddleware } from './middleware/proxy.middleware';
 import { Response, NextFunction, Request } from 'express';
 import { JwtHelper } from './common/jwt-helper';
+import { v4 as uuidv4 } from 'uuid';
 
 const { port, userServiceUrl, orchestratorUrl, templateServiceUrl, redisUrl } =
   config();
@@ -65,21 +66,49 @@ async function bootstrap() {
         // Return true if route requires auth (i.e., NOT public)
         return !isPublic;
       },
+      extraHeaders: undefined,
     },
     {
       path: '/template',
       target: templateServiceUrl,
       requireAuth: () => true, // all template routes require authentication
+      extraHeaders: undefined,
     },
     {
       path: '/notifications',
       target: orchestratorUrl,
       requireAuth: () => false, // all orchestrator routes require authentication
+      extraHeaders: (req: UserRequest) => {
+        const resolveHeaderValue = (
+          value: string | string[] | undefined,
+        ): string | undefined => {
+          if (Array.isArray(value)) {
+            return value.find(
+              (item) => typeof item === 'string' && item.trim().length > 0,
+            );
+          }
+          return typeof value === 'string' && value.trim().length > 0
+            ? value
+            : undefined;
+        };
+
+        const existingIdempotencyKey = resolveHeaderValue(
+          req.headers['x-idempotency-key'] as string | string[] | undefined,
+        );
+        const existingCorrelationId = resolveHeaderValue(
+          req.headers['x-correlation-id'] as string | string[] | undefined,
+        );
+
+        return {
+          'X-Idempotency-Key': existingIdempotencyKey ?? uuidv4(),
+          'X-Correlation-ID': existingCorrelationId ?? uuidv4(),
+        };
+      },
     },
   ];
 
   // Register proxy routes
-  proxyRoutes.forEach(({ path, target, requireAuth }) => {
+  proxyRoutes.forEach(({ path, target, requireAuth, extraHeaders }) => {
     app.use(path, (req: Request, res: Response, next: NextFunction) => {
       // Validate JWT token and set user if present (for authenticated routes)
       const userReq = req as unknown as UserRequest;
@@ -118,7 +147,7 @@ async function bootstrap() {
           `[Main] Route: ${originalUrl}, requireAuth returned: ${addUserHeader}, hasUser: ${!!userReq.user}`,
         );
         try {
-          userReq.proxy(target!, path, addUserHeader);
+          userReq.proxy(target!, path, addUserHeader, { extraHeaders });
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : 'Unknown error';

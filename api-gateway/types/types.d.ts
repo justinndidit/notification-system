@@ -7,12 +7,21 @@ declare interface JwtRequest extends Request {
   user: JwtPayload;
 }
 
+declare type ExtraHeaders =
+  | Record<string, string>
+  | ((req: UserRequest) => Record<string, string>);
+
+declare interface ProxyOptions {
+  extraHeaders?: ExtraHeaders;
+}
+
 declare interface UserRequest extends Request {
   user?: { userId: string };
   proxy?: (
     targetUrl: string,
     pathPrefix: string,
     addUserHeader?: boolean,
+    options?: ProxyOptions,
   ) => ReturnType<typeof proxy>;
 }
 
