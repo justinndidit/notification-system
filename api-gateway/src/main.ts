@@ -31,6 +31,7 @@ async function bootstrap() {
   // Set up proxy routes for user and template services
   const proxyMiddleware = app.get(ProxyMiddleware);
   const jwtHelper = app.get(JwtHelper);
+  console.log('[CONFIG]', { userServiceUrl, orchestratorUrl, templateServiceUrl, redisUrl });
 
   const proxyRoutes = [
     {
