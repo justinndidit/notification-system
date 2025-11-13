@@ -28,6 +28,9 @@ WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/api-gateway/node_modules ./api-gateway/node_modules
 
+# Remove existing api-gateway folder to avoid COPY conflicts
+RUN rm -rf /usr/src/app/api-gateway
+
 # Copy the rest of the application
 COPY api-gateway ./api-gateway
 

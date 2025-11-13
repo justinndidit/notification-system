@@ -9,7 +9,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { LoggingInterceptor } from './middleware/logging.interceptor';
 import { ThrottlerStorageModule } from './throttler/throttler-storage.module';
 import { ProxyModule } from './middleware/proxy.module';
-import { NotificationModule } from './notification/notification.module';
+// import { NotificationModule } from './notification/notification.module';
 import { AuthModule } from './auth/auth.module';
 import { ResponseInterceptor } from './common/interceptors/response.interceptors';
 import { RedisModule } from './common/redis.module';
@@ -21,7 +21,7 @@ import { JwtHelper } from './common/jwt-helper';
     RedisModule,
     ProxyModule,
     AuthModule,
-    NotificationModule,
+    // NotificationModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRootAsync({
       imports: [ThrottlerStorageModule],

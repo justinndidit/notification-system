@@ -11,7 +11,13 @@ import {
   UpdateTemplateDto,
 } from './dto/create.template.dto';
 import * as Handlebars from 'handlebars';
-import { NotificationChannel, Prisma, Template } from '@prisma/client';
+import {
+  NotificationChannel,
+  Prisma,
+  Template,
+  Preference,
+  User,
+} from '@prisma/client';
 import {
   PaginatedResponse,
   PaginationMeta,
@@ -183,11 +189,12 @@ export class TemplateService {
   //  Render with substitution
   async render(
     templateId: string,
-    dto: RenderTemplateDto,
+    dto?: RenderTemplateDto,
   ): Promise<RenderedMessage[]> {
-    const { data } = dto;
+    const payload = dto ?? {};
+    const { data: dtoData, userId } = payload;
+    const baseData: Record<string, unknown> = dtoData ?? {};
 
-    // Fetch template including versions
     const template = await this.prisma.template.findUnique({
       where: { id: templateId },
       include: {
@@ -202,25 +209,150 @@ export class TemplateService {
       throw new NotFoundException('No version available');
 
     const latestVersion = template.versions[0];
+    const targetUsers = await this.resolveTargetUsers(template, userId);
     const results: RenderedMessage[] = [];
 
-    for (const channel of template.channel) {
-      if (channel === 'EMAIL') {
-        results.push({
-          channel: 'EMAIL',
-          subject: Handlebars.compile(latestVersion.subject || '')(data),
-          html: Handlebars.compile(latestVersion.body || '')(data),
-        });
-      } else if (channel === 'PUSH') {
-        results.push({
-          channel: 'PUSH',
-          title: Handlebars.compile(latestVersion.title || '')(data),
-          body: Handlebars.compile(latestVersion.body || '')(data),
-        });
+    for (const user of targetUsers) {
+      const eligibleChannels = this.getEligibleChannelsForUser(
+        user,
+        template.channel,
+      );
+
+      if (!eligibleChannels.length) continue;
+
+      const renderContext = this.buildRenderContext(user, baseData);
+
+      for (const channel of eligibleChannels) {
+        if (channel === NotificationChannel.EMAIL) {
+          results.push({
+            channel,
+            subject: this.compileTemplate(latestVersion.subject, renderContext),
+            html: this.compileTemplate(latestVersion.body, renderContext),
+            recipient: this.mapRecipient(user),
+            metadata: {
+              templateId: template.id,
+              templateVersion: latestVersion.version,
+            },
+          });
+        }
+
+        if (channel === NotificationChannel.PUSH) {
+          results.push({
+            channel,
+            title: this.compileTemplate(latestVersion.title, renderContext),
+            body: this.compileTemplate(latestVersion.body, renderContext),
+            recipient: this.mapRecipient(user),
+            metadata: {
+              templateId: template.id,
+              templateVersion: latestVersion.version,
+            },
+          });
+        }
       }
     }
 
+    if (!results.length)
+      throw new NotFoundException(
+        'No eligible recipients found for this template',
+      );
+
     return results;
+  }
+
+  private async resolveTargetUsers(
+    template: Template,
+    userId?: string,
+  ): Promise<Array<User & { preferences: Preference | null }>> {
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { preferences: true },
+      });
+
+      if (!user) throw new NotFoundException('User not found');
+
+      return [user];
+    }
+
+    return this.prisma.user.findMany({
+      where: {
+        preferences: {
+          is: {
+            language: template.language,
+          },
+        },
+      },
+      include: { preferences: true },
+      orderBy: {
+        created_at: 'asc',
+      },
+    });
+  }
+
+  private getEligibleChannelsForUser(
+    user: User & { preferences: Preference | null },
+    templateChannels: NotificationChannel[],
+  ): NotificationChannel[] {
+    const preferences = user.preferences;
+    if (!preferences) return [];
+
+    return templateChannels.filter((channel) => {
+      if (channel === NotificationChannel.EMAIL) {
+        return preferences.email_opt_in;
+      }
+      if (channel === NotificationChannel.PUSH) {
+        return preferences.push_opt_in;
+      }
+      return false;
+    });
+  }
+
+  private buildRenderContext(
+    user: User & { preferences: Preference | null },
+    data: Record<string, unknown>,
+  ) {
+    const { user: manualUserDataRaw, ...restData } = {
+      ...data,
+    } as Record<string, unknown> & { user?: unknown };
+    const manualUserData =
+      manualUserDataRaw && typeof manualUserDataRaw === 'object'
+        ? (manualUserDataRaw as Record<string, unknown>)
+        : undefined;
+    return {
+      ...restData,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        push_token: user.push_token,
+        preferences: user.preferences
+          ? {
+              email_opt_in: user.preferences.email_opt_in,
+              push_opt_in: user.preferences.push_opt_in,
+              language: user.preferences.language,
+            }
+          : undefined,
+        ...(manualUserData ?? {}),
+      },
+    };
+  }
+
+  private compileTemplate(
+    templateString: string | null | undefined,
+    context: Record<string, unknown>,
+  ) {
+    if (!templateString) return undefined;
+    return Handlebars.compile(templateString)(context);
+  }
+
+  private mapRecipient(user: User & { preferences: Preference | null }) {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      push_token: user.push_token ?? undefined,
+    };
   }
 
   // Get by event/channel/lang (for dynamic sends)

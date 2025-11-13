@@ -30,6 +30,9 @@ COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/services/user-service/node_modules ./services/user-service/node_modules
 COPY --from=deps /usr/src/app/services/user-service/prisma ./services/user-service/prisma
 
+# Remove existing user-service folder to avoid COPY conflicts
+RUN rm -rf /usr/src/app/services/user-service
+
 # Copy the rest of the application
 COPY services/user-service ./services/user-service
 

@@ -48,8 +48,13 @@ export class UpdateTemplateDto extends PartialType(CreateTemplateDto) {
 }
 
 export class RenderTemplateDto {
+  @IsOptional()
   @IsObject()
-  data: Record<string, any>; // Vars to substitute, e.g., { user: { name: 'John' }, order: { id: '123' } }
+  data?: Record<string, unknown>; // Vars to substitute, e.g., { user: { name: 'John' }, order: { id: '123' } }
+
+  @IsOptional()
+  @IsString()
+  userId?: string; // Target a specific user
 }
 export class PaginationDto {
   @IsOptional()

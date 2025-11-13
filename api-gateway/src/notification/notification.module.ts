@@ -8,6 +8,6 @@ import { RedisModule } from '../common/redis.module';
   imports: [HttpModule, RedisModule],
   controllers: [NotificationController],
   providers: [NotificationService],
-  exports: [NotificationService],
+  //   exports: [NotificationService],
 })
 export class NotificationModule {}

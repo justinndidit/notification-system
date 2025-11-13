@@ -30,6 +30,9 @@ COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/services/template-service/node_modules ./services/template-service/node_modules
 COPY --from=deps /usr/src/app/services/template-service/prisma ./services/template-service/prisma
 
+# Remove existing template-service folder to avoid COPY conflicts
+RUN rm -rf /usr/src/app/services/template-service
+
 # Copy the rest of the application
 COPY services/template-service ./services/template-service
 

@@ -35,12 +35,26 @@ declare interface JwtRequest extends Request {
   user: JwtPayload;
 }
 
+declare interface RenderRecipient {
+  id: string;
+  name: string;
+  email: string;
+  push_token?: unknown;
+}
+
+declare interface RenderMetadata {
+  templateId: string;
+  templateVersion: number;
+}
+
 declare interface RenderedMessage {
   channel: NotificationChannel;
   subject?: string;
   html?: string;
   title?: string;
   body?: string;
+  recipient?: RenderRecipient;
+  metadata?: RenderMetadata;
 }
 
 declare interface PaginationMeta {

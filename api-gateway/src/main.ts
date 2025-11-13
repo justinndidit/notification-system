@@ -72,7 +72,7 @@ async function bootstrap() {
       requireAuth: () => true, // all template routes require authentication
     },
     {
-      path: '/orchestrator',
+      path: '/notifications',
       target: orchestratorUrl,
       requireAuth: () => false, // all orchestrator routes require authentication
     },
