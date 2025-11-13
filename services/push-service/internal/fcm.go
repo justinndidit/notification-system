@@ -86,11 +86,7 @@ func (f *FCMClient) Send(ctx context.Context, msg *PushNotificationMessage, toke
 		batchTokens := tokens[i:end]
 		batchResults, err := f.sendBatch(ctx, msg, batchTokens)
 		if err != nil {
-			f.logger.Error().Err(err).
-				Str("batch_start", i).
-				Str("batch_size", len(batchTokens)),
-				Str("error", err).Msg("Failed to send FCM batch")
-			f.logger.Error().Err(err).Str("batch_size", i)
+			f.logger.Error().Err(err).Msg("Failed to send FCM batch")
 
 			// Create failed results for this batch
 			for _, token := range batchTokens {
@@ -112,7 +108,7 @@ func (f *FCMClient) Send(ctx context.Context, msg *PushNotificationMessage, toke
 	return results, nil
 }
 
-func (f *FCMClient) sendBatch(ctx context.Context, msg *models.PushNotificationMessage, tokens []string) ([]models.PushResult, error) {
+func (f *FCMClient) sendBatch(ctx context.Context, msg *PushNotificationMessage, tokens []string) ([]PushResult, error) {
 	payload := fcmPayload{
 		RegistrationIDs: tokens,
 		Notification: fcmNotification{
@@ -168,12 +164,12 @@ func (f *FCMClient) sendBatch(ctx context.Context, msg *models.PushNotificationM
 	}
 
 	// Parse results
-	results := make([]models.PushResult, 0, len(tokens))
+	results := make([]PushResult, 0, len(tokens))
 	for i, token := range tokens {
-		result := models.PushResult{
+		result := PushResult{
 			NotificationID: msg.NotificationID,
 			Token:          token,
-			Platform:       models.PlatformAndroid,
+			Platform:       PlatformAndroid,
 			SentAt:         time.Now(),
 		}
 
@@ -194,17 +190,17 @@ func (f *FCMClient) sendBatch(ctx context.Context, msg *models.PushNotificationM
 		results = append(results, result)
 	}
 
-	f.logger.Info("FCM batch sent",
-		"notification_id", msg.NotificationID,
-		"tokens_sent", len(tokens),
-		"success", fcmResp.Success,
-		"failure", fcmResp.Failure)
-
+	// f.logger.Info().Msg("FCM batch sent").
+	// 	"notification_id", msg.NotificationID,
+	// 	"tokens_sent", len(tokens),
+	// 	"success", fcmResp.Success,
+	// 	"failure", fcmResp.Failure)
+	f.logger.Info().Str("notification_id", msg.NotificationID).Msg("FCM batch sent")
 	return results, nil
 }
 
 func (f *FCMClient) mapPriority(priority string) string {
-	if priority == models.PriorityHigh {
+	if priority == PriorityHigh {
 		return "high"
 	}
 	return "normal"
