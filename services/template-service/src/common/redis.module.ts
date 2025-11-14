@@ -13,6 +13,7 @@ const { redisUrl } = config();
       provide: 'REDIS_CLIENT',
       useFactory: () => {
         const connectionString = redisUrl || 'redis://localhost:6379';
+
         // ioredis automatically handles connection strings with credentials
         // For Redis Cloud, the URL format is: redis://username:password@host:port
         const redisClient = new Redis(connectionString, {
@@ -28,23 +29,26 @@ const { redisUrl } = config();
 
         // Log connection events for debugging
         redisClient.on('connect', () => {
-          console.log('✅ Redis client connected');
+          console.log('✅ [Template Service] Redis client connected');
         });
 
         redisClient.on('ready', () => {
-          console.log('✅ Redis client ready');
+          console.log('✅ [Template Service] Redis client ready');
         });
 
         redisClient.on('error', (err) => {
-          console.error('❌ Redis client error:', err.message);
+          console.error(
+            '❌ [Template Service] Redis client error:',
+            err.message,
+          );
         });
 
         redisClient.on('close', () => {
-          console.log('⚠️  Redis client connection closed');
+          console.log('⚠️  [Template Service] Redis client connection closed');
         });
 
         redisClient.on('reconnecting', () => {
-          console.log('🔄 Redis client reconnecting...');
+          console.log('🔄 [Template Service] Redis client reconnecting...');
         });
 
         return redisClient;

@@ -29,19 +29,15 @@ export class TemplateController {
   @Post()
   create(@Body() createTemplateDto: CreateTemplateDto, @Req() req: JwtRequest) {
     try {
-
-      console.log("in here!")
       const role = req.user.role;
-          console.log("in here!")
-
-      // if (role !== 'admin') {
-      //   throw new UnauthorizedException(
-      //     'Forbidden: You are not authorized to create a template',
-      //   );
-      // }
+      if (role !== 'admin') {
+        throw new UnauthorizedException(
+          'Forbidden: You are not authorized to create a template',
+        );
+      }
       return this.templatesService.create(createTemplateDto);
-    } catch(error) {
-      console.log(error)
+    } catch (error) {
+      console.log(error);
     }
   }
 

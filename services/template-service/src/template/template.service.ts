@@ -15,6 +15,7 @@ import {
   NotificationChannel,
   Prisma,
   Template,
+  TemplateVersion,
   Preference,
   User,
 } from '@prisma/client';
@@ -23,10 +24,14 @@ import {
   PaginationMeta,
   RenderedMessage,
 } from 'src/types/types';
+import { CacheService } from '../common/cache.service';
 
 @Injectable()
 export class TemplateService {
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private cacheService: CacheService,
+  ) {
     // Register Handlebars helpers if needed (e.g., {{if}} for conditionals)
     Handlebars.registerHelper(
       'ifEquals',
@@ -56,20 +61,32 @@ export class TemplateService {
         'Template exists for this event/channel/language',
       );
 
-    return this.prisma.$transaction(async (prisma) => {
+    const template = await this.prisma.$transaction(async (prisma) => {
       // Create template
-      const template = await prisma.template.create({
+      const newTemplate = await prisma.template.create({
         data: { name, event, channel, language },
         include: { versions: true },
       });
 
       // Create v1
       await prisma.templateVersion.create({
-        data: { template_id: template.id, subject, title, body, variables },
+        data: { template_id: newTemplate.id, subject, title, body, variables },
       });
 
-      return template;
+      return newTemplate;
     });
+
+    // Invalidate cache for this event/channel/language combination
+    for (const ch of channel) {
+      await this.cacheService.invalidateTemplate(
+        template.id,
+        event,
+        ch,
+        language,
+      );
+    }
+
+    return template;
   }
 
   //FIND TEMPLATE
@@ -131,6 +148,17 @@ export class TemplateService {
 
   //FIND TEMPLATE BY ID
   async findOne(id: string, includeHistory = true) {
+    const cacheKey = `template:${id}:${includeHistory ? 'full' : 'latest'}`;
+
+    // Try to get from cache first
+    const cachedTemplate = await this.cacheService.get<
+      Template & { versions: TemplateVersion[] }
+    >(cacheKey);
+    if (cachedTemplate) {
+      return cachedTemplate;
+    }
+
+    // If not in cache, fetch from database
     const template = await this.prisma.template.findUnique({
       where: { id },
       include: {
@@ -141,6 +169,10 @@ export class TemplateService {
       },
     });
     if (!template) throw new NotFoundException('Template not found');
+
+    // Cache for 30 minutes
+    await this.cacheService.set(cacheKey, template, 1800);
+
     return template;
   }
 
@@ -162,15 +194,21 @@ export class TemplateService {
       );
 
       const latestVersion = template.versions[0];
+      if (!latestVersion) {
+        throw new NotFoundException('No version found for this template');
+      }
 
       const newVersion = await this.prisma.templateVersion.create({
         data: {
           template_id: id,
           version: latestVersionNumber + 1,
-          subject: updateDto.subject ?? latestVersion.subject,
-          title: updateDto.title ?? latestVersion.title,
+          subject: updateDto.subject ?? latestVersion.subject ?? null,
+          title: updateDto.title ?? latestVersion.title ?? null,
           body: updateDto.body ?? latestVersion.body,
-          variables: updateDto.variables ?? latestVersion.variables ?? {},
+          variables:
+            (updateDto.variables as Prisma.InputJsonValue | undefined) ??
+            (latestVersion.variables as Prisma.InputJsonValue | null) ??
+            ({} as Prisma.InputJsonValue),
         },
       });
 
@@ -179,11 +217,32 @@ export class TemplateService {
         data: { updated_at: new Date() },
       });
 
+      // Invalidate cache
+      await this.cacheService.invalidateTemplate(
+        template.id,
+        template.event,
+        undefined,
+        template.language,
+      );
+
       return newVersion;
     }
 
     // Else, just update metadata
-    return this.prisma.template.update({ where: { id }, data: updateDto });
+    const updated = await this.prisma.template.update({
+      where: { id },
+      data: updateDto,
+    });
+
+    // Invalidate cache
+    await this.cacheService.invalidateTemplate(
+      updated.id,
+      updated.event,
+      undefined,
+      updated.language,
+    );
+
+    return updated;
   }
 
   //  Render with substitution
@@ -361,6 +420,17 @@ export class TemplateService {
     channel: NotificationChannel,
     language = 'en',
   ) {
+    const cacheKey = `template:event:${event}:${channel}:${language}`;
+
+    // Try to get from cache first
+    const cachedTemplate = await this.cacheService.get<
+      Template & { versions: TemplateVersion[] }
+    >(cacheKey);
+    if (cachedTemplate) {
+      return cachedTemplate;
+    }
+
+    // If not in cache, fetch from database
     const template = await this.prisma.template.findFirst({
       where: { event, channel: { has: channel }, language, isActive: true },
       include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
@@ -369,13 +439,37 @@ export class TemplateService {
       throw new NotFoundException(
         `No template for ${event}/${channel}/${language}`,
       );
+
+    // Cache for 30 minutes
+    await this.cacheService.set(cacheKey, template, 1800);
+
     return template;
   }
 
   //DELETE
   async delete(id: string) {
-    return this.prisma.template.delete({
+    // Get template first to invalidate cache properly
+    const template = await this.prisma.template.findUnique({
+      where: { id },
+      select: { id: true, event: true, language: true, channel: true },
+    });
+
+    const deleted = await this.prisma.template.delete({
       where: { id },
     });
+
+    // Invalidate cache
+    if (template) {
+      for (const ch of template.channel) {
+        await this.cacheService.invalidateTemplate(
+          template.id,
+          template.event,
+          ch,
+          template.language,
+        );
+      }
+    }
+
+    return deleted;
   }
 }

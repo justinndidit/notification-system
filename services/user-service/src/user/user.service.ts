@@ -16,12 +16,14 @@ import {
 } from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
 import { Preference, Prisma, User } from '@prisma/client';
+import { CacheService } from '../common/cache.service';
 
 @Injectable()
 export class UserService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private cacheService: CacheService,
   ) {}
 
   //SIGN UP
@@ -138,6 +140,17 @@ export class UserService {
 
   //GET USER BY ID
   async getUserById(userId: string) {
+    const cacheKey = `user:${userId}`;
+
+    // Try to get from cache first
+    const cachedUser = await this.cacheService.get<
+      User & { preferences: Preference | null }
+    >(cacheKey);
+    if (cachedUser) {
+      return cachedUser;
+    }
+
+    // If not in cache, fetch from database
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -147,6 +160,9 @@ export class UserService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Cache for 10 minutes
+    await this.cacheService.set(cacheKey, user, 600);
 
     return user;
   }
@@ -169,6 +185,9 @@ export class UserService {
         ...updateDto,
       },
     });
+
+    // Invalidate cache
+    await this.cacheService.invalidateUser(userId);
 
     return { message: 'Preference updated successfully', updatedPreference };
   }
@@ -212,6 +231,17 @@ export class UserService {
 
   //GET users preference by Ids
   async getUserPreference(userId: string) {
+    const cacheKey = `user:preferences:${userId}`;
+
+    // Try to get from cache first
+    const cachedPreferences = await this.cacheService.get<Preference | null>(
+      cacheKey,
+    );
+    if (cachedPreferences !== null) {
+      return cachedPreferences;
+    }
+
+    // If not in cache, fetch from database
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -222,6 +252,9 @@ export class UserService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Cache for 10 minutes
+    await this.cacheService.set(cacheKey, user.preferences, 600);
 
     return user.preferences;
   }
@@ -260,6 +293,9 @@ export class UserService {
       },
       select: { id: true, push_token: true },
     });
+
+    // Invalidate cache since user data changed
+    await this.cacheService.invalidateUser(userId);
 
     return {
       user_id: updated.id,

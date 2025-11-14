@@ -32,8 +32,6 @@ async function bootstrap() {
   // Set up proxy routes for user and template services
   const proxyMiddleware = app.get(ProxyMiddleware);
   const jwtHelper = app.get(JwtHelper);
-  console.log('[CONFIG]', { userServiceUrl, orchestratorUrl, templateServiceUrl, redisUrl });
-
   const proxyRoutes = [
     {
       path: '/user',
@@ -114,39 +112,21 @@ async function bootstrap() {
       // Validate JWT token and set user if present (for authenticated routes)
       const userReq = req as unknown as UserRequest;
       const token = jwtHelper.extractTokenFromRequest(req);
-      //   console.log(`[JWT] Token extracted: ${token ? 'Yes' : 'No'}, Headers:`, {
-      //     authorization: req.headers.authorization,
-      //     Authorization: req.headers['Authorization'],
-      //   });
+
       if (token) {
         const payload = jwtHelper.validateToken(token);
-        console.log(
-          `[JWT] Token validation result:`,
-          payload ? 'Valid' : 'Invalid',
-        );
         if (payload) {
-          //   console.log(`[JWT] Setting user:`, payload);
           userReq.user = {
             userId: payload.user_id,
           };
-          //   console.log(`[JWT] User set, verifying:`, userReq.user);
-        } else {
-          console.log(
-            `[JWT] Token validation failed - token might be invalid or expired`,
-          );
         }
-      } else {
-        console.log(`[JWT] No token found in request headers`);
       }
+
       proxyMiddleware.use(userReq, res, next);
 
       // Execute the proxy function immediately after it's set up
       if (userReq.proxy) {
         const addUserHeader = requireAuth(req);
-        const originalUrl = req.originalUrl || req.url || '';
-        console.log(
-          `[Main] Route: ${originalUrl}, requireAuth returned: ${addUserHeader}, hasUser: ${!!userReq.user}`,
-        );
         try {
           userReq.proxy(target!, path, addUserHeader, { extraHeaders });
         } catch (error) {
