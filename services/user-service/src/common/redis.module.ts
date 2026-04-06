@@ -1,18 +1,15 @@
 import { Module, Global } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
-import config from '../config/config';
-
-const { redisUrl } = config();
-
 @Global()
 @Module({
   imports: [ConfigModule],
   providers: [
     {
       provide: 'REDIS_CLIENT',
-      useFactory: () => {
-        const connectionString = redisUrl || 'redis://localhost:6379';
+      inject: [ConfigService],
+      useFactory: (configService : ConfigService) => {
+        const connectionString = configService.get<string>('redisUrl') || '';
 
         // ioredis automatically handles connection strings with credentials
         // For Redis Cloud, the URL format is: redis://username:password@host:port

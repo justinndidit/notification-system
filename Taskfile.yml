@@ -1,9 +1,9 @@
-# version: '3'
+version: '3'
 
 # vars:
 #   TASKER_DB_DSN: '{{.TASKER_DB_DSN | default ""}}'
 
-# tasks:
+tasks:
 #   help:
 #     desc: print this help message
 #     cmds:
@@ -44,16 +44,24 @@
   #   - echo 'Running up migrations...'
   #   - tern migrate -m ./internal/database/migrations --conn-string {{.TASKER_DB_DSN}}
 
+  go:tidy:
+    desc: format all .go files, and tidy and vendor module dependencies
+    cmds:
+      - echo 'Formatting .go files...'
+      - go fmt ./...
+      - echo 'Tidying module dependencies...'
+      - go mod tidy
+      - echo 'Verifying dependencies...'
+      - go mod verify
 
-  # go:tidy:
-  #   desc: format all .go files, and tidy and vendor module dependencies
-  #   cmds:
-  #   - echo 'Formatting .go files...'
-  #   - go fmt ./...
-  #   - echo 'Tidying module dependencies...'
-  #   - go mod tidy
-  #   - echo 'Verifying dependencies...'
-  #   - go mod verify
+  ts:install:
+    desc: install typescript dependencies in all typescript services
+    cmd: pnpm install
+
+  go:install:
+    desc: installs dependecies across all go services
+    cmds:
+    - echo
 
   # build:gateway:
   #   desc: build api-gateway service
