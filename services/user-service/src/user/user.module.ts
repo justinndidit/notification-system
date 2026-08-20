@@ -7,6 +7,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { UserService } from './user.service';
 import { UserController } from './user.controller';
 import { CacheService } from '../common/cache.service';
+import { ServiceOrJwtGuard } from '../common/service-or-jwt.guard';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { CacheService } from '../common/cache.service';
     ConfigModule,
   ],
 
-  providers: [UserService, JwtStrategy, CacheService],
+  providers: [UserService, JwtStrategy, CacheService, ServiceOrJwtGuard],
   controllers: [UserController],
   exports: [JwtStrategy, PassportModule],
 })

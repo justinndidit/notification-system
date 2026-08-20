@@ -9,7 +9,7 @@ import { Response, NextFunction, Request } from 'express';
 import { JwtHelper } from './common/jwt-helper';
 import { v4 as uuidv4 } from 'uuid';
 
-const { port, userServiceUrl, orchestratorUrl, templateServiceUrl, redisUrl } =
+const { port, userServiceUrl, orchestratorUrl, templateServiceUrl } =
   config();
 
 async function bootstrap() {
@@ -76,7 +76,7 @@ async function bootstrap() {
     {
       path: '/notifications',
       target: orchestratorUrl,
-      requireAuth: () => false, // all orchestrator routes require authentication
+      requireAuth: () => true, // all orchestrator routes require authentication
       extraHeaders: (req: UserRequest) => {
         const resolveHeaderValue = (
           value: string | string[] | undefined,
@@ -154,7 +154,6 @@ async function bootstrap() {
   console.log(`📡 User Service: ${userServiceUrl}`);
   console.log(`📡 Orchestrator Service: ${orchestratorUrl}`);
   console.log(`📡 Template Service: ${templateServiceUrl}`);
-  console.log(`📡 Redis: ${redisUrl}`);
   console.log(
     `\n✅ Notification endpoints available at: http://localhost:${port || 3000}/notifications\n`,
   );

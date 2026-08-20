@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsBoolean,
   IsInt,
+  IsIn,
   Min,
   Max,
 } from 'class-validator';
@@ -25,9 +26,13 @@ export class RegisterDto {
   @IsString()
   push_token?: string;
 
-  @IsOptional()
-  @IsString()
-  role?: string;
+  // `role` is intentionally absent. Accepting it here let any caller register
+  // themselves as an admin. Roles are assigned via PATCH /user/:id/role.
+}
+
+export class UpdateRoleDto {
+  @IsIn(['user', 'admin'], { message: 'Role must be either "user" or "admin"' })
+  role: string;
 }
 
 export class LoginDto {

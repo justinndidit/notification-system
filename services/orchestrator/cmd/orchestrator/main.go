@@ -77,8 +77,16 @@ func main() {
 
 	// Initialize service clients
 	logger.Info().Msg("Initializing service clients...")
-	templateClient := services.NewTemplateClient(&logger, "http://template-service:3003")
-	userClient := services.NewUserClient(&logger, "http://user-service:3007")
+	templateClient := services.NewTemplateClient(
+		&logger,
+		cfg.External.TemplateServiceAddress,
+		cfg.External.InternalToken,
+	)
+	userClient := services.NewUserClient(
+		&logger,
+		cfg.External.UserServiceAddress,
+		cfg.External.InternalToken,
+	)
 
 	// Initialize orchestrator
 	logger.Info().Msg("Initializing orchestrator...")

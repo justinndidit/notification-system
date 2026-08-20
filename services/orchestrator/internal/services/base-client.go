@@ -15,11 +15,14 @@ import (
 type BaseHTTPClient struct {
 	logger     *zerolog.Logger
 	httpClient *http.Client
+	// Headers attached to every outgoing request (e.g. the internal service token).
+	defaultHeaders map[string]string
 }
 
-func NewBaseHTTPClient(logger *zerolog.Logger) *BaseHTTPClient {
+func NewBaseHTTPClient(logger *zerolog.Logger, defaultHeaders map[string]string) *BaseHTTPClient {
 	return &BaseHTTPClient{
-		logger: logger,
+		logger:         logger,
+		defaultHeaders: defaultHeaders,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -40,6 +43,10 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return backoff.Permanent(err)
+		}
+
+		for k, v := range b.defaultHeaders {
+			req.Header.Set(k, v)
 		}
 
 		resp, err := b.httpClient.Do(req)

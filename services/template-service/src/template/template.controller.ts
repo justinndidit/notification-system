@@ -13,6 +13,7 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { TemplateService } from './template.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ServiceOrJwtGuard } from '../common/service-or-jwt.guard';
 import {
   CreateTemplateDto,
   PaginationDto,
@@ -22,10 +23,10 @@ import {
 import type { JwtRequest, RenderedMessage } from 'src/types/types';
 import { NotificationChannel } from '@prisma/client';
 
-@UseGuards(JwtAuthGuard)
 @Controller('template')
 export class TemplateController {
   constructor(private readonly templatesService: TemplateService) {}
+  @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() createTemplateDto: CreateTemplateDto, @Req() req: JwtRequest) {
     try {
@@ -41,6 +42,7 @@ export class TemplateController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get()
   getAllTemplates(
     @Query() paginationDto: PaginationDto,
@@ -56,11 +58,13 @@ export class TemplateController {
     return this.templatesService.getPaginatedTemplates(paginationDto, filters);
   }
 
+  @UseGuards(ServiceOrJwtGuard)
   @Get(':id')
   findOne(@Param('id') id: string, @Query('history') includeHistory?: boolean) {
     return this.templatesService.findOne(id, includeHistory);
   }
 
+  @UseGuards(ServiceOrJwtGuard)
   @Post(':id/render')
   render(
     @Param('id') id: string,
@@ -69,6 +73,7 @@ export class TemplateController {
     return this.templatesService.render(id, renderDto);
   }
 
+  @UseGuards(ServiceOrJwtGuard)
   @Get('event/:event/channel/:channel')
   getByEvent(
     @Param('event') event: string,
@@ -83,6 +88,7 @@ export class TemplateController {
     );
   }
 
+  @UseGuards(JwtAuthGuard)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -91,6 +97,7 @@ export class TemplateController {
     return this.templatesService.update(id, updateTemplateDto);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.templatesService.delete(id);

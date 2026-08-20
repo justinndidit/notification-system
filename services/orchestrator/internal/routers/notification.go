@@ -7,7 +7,9 @@ import (
 
 func SetupRoutes(app *app.App) *chi.Mux {
 	r := chi.NewRouter()
-	r.Post("/notification", app.NHandler.HandleNotificationRequest)
+	// Path must match the API Gateway's mount prefix: the gateway forwards the
+	// full original path (including the prefix) rather than stripping it.
+	r.Post("/notifications", app.NHandler.HandleNotificationRequest)
 	r.Get("/health", app.HHandler.HandleHealthCheck)
 
 	return r

@@ -16,9 +16,11 @@ import {
   PaginationDto,
   RegisterDto,
   UpdatePreferenceDto,
+  UpdateRoleDto,
 } from './dto/user.dto';
 import { UserService } from './user.service';
 import { JwtAuthGaurd } from './jwt-auth.guard';
+import { ServiceOrJwtGuard } from '../common/service-or-jwt.guard';
 
 @Controller('user')
 export class UserController {
@@ -72,8 +74,10 @@ export class UserController {
   }
 
   //GET USER PREFERENCE BY ID
+  // Called by end users and by the orchestrator during enrichment, so it
+  // accepts either a user JWT or the internal service token.
   @Get('preference/:id')
-  // @UseGuards(JwtAuthGaurd)
+  @UseGuards(ServiceOrJwtGuard)
   getUserPreference(@Param('id') userId: string) {
     return this.userService.getUserPreference(userId);
   }
@@ -92,6 +96,24 @@ export class UserController {
       );
     }
     return this.userService.updatePreference(userId, updateDto);
+  }
+
+  // UPDATE ROLE (admin only)
+  // Role is deliberately not settable at signup — it is assigned here by an
+  // existing admin, so a self-service registration cannot escalate itself.
+  @Patch(':id/role')
+  @UseGuards(JwtAuthGaurd)
+  updateRole(
+    @Param('id') userId: string,
+    @Body() updateRoleDto: UpdateRoleDto,
+    @Req() req: JwtRequest,
+  ) {
+    if (req.user.role !== 'admin') {
+      throw new UnauthorizedException(
+        'Forbidden: You are not authorized to change user roles',
+      );
+    }
+    return this.userService.updateRole(userId, updateRoleDto.role);
   }
 
   //   update push token

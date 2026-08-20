@@ -28,7 +28,7 @@ export class UserService {
 
   //SIGN UP
   async signup(registerDto: RegisterDto) {
-    const { name, email, password, push_token, role } = registerDto;
+    const { name, email, password, push_token } = registerDto;
     //checking if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -46,7 +46,8 @@ export class UserService {
           email,
           password: hashedPassword,
           push_token,
-          role,
+          // Never taken from the request body — see UpdateRoleDto / updateRole().
+          role: 'user',
         },
       });
       await prisma.preference.create({
@@ -301,5 +302,27 @@ export class UserService {
       user_id: updated.id,
       push_token: updated.push_token as WebPushSubscription | null,
     };
+  }
+
+  //UPDATE ROLE (admin only — authorization is enforced in the controller)
+  async updateRole(
+    userId: string,
+    role: string,
+  ): Promise<{ user_id: string; role: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role },
+      select: { id: true, role: true },
+    });
+
+    // Invalidate cache since user data changed
+    await this.cacheService.invalidateUser(userId);
+
+    return { user_id: updated.id, role: updated.role };
   }
 }
