@@ -60,18 +60,21 @@ type ServerConfig struct {
 // 	Enabled       bool   `koanf:"enabled"`
 // }
 
-// type ExternalServices struct {
-// 	UserServiceAddress     string `koanf:"user_service_address" validate:"required"`
-// 	TemplateServiceAddress string `koanf:"template_service_address" validate:"required"`
-// }
+type ExternalServices struct {
+	UserServiceAddress     string `koanf:"user_service_address" validate:"required"`
+	TemplateServiceAddress string `koanf:"template_service_address" validate:"required"`
+	// Shared secret sent as X-Service-Token on internal service-to-service calls.
+	// Interim measure until proper service identity (mTLS or signed service JWTs).
+	InternalToken string `koanf:"internal_token" validate:"required"`
+}
 
 type Config struct {
-	Database DatabaseConfig `koanf:"database"`
-	Redis    RedisConfig    `koanf:"redis"`
-	RabbitMQ RabbitMQConfig `koanf:"rabbitmq"`
-	Server   ServerConfig   `koanf:"server"`
+	Database DatabaseConfig   `koanf:"database"`
+	Redis    RedisConfig      `koanf:"redis"`
+	RabbitMQ RabbitMQConfig   `koanf:"rabbitmq"`
+	Server   ServerConfig     `koanf:"server"`
+	External ExternalServices `koanf:"external"`
 	// Consul           ConsulConfig     `koanf:"consul"`
-	// External ExternalServices `koanf:"external_services"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -277,17 +280,18 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 			routingKey: "notification.email",
 		},
 		{
-			name:       "push_queue",
-			routingKey: "notification.push",
-		},
-		{
 			name:       "sms_queue",
 			routingKey: "notification.sms",
 		},
-		// Add orchestrator queue if needed (for confirmations/failures)
+		// The push queue is named by config so the push service and the
+		// orchestrator agree on it (RABBITMQ_QUEUE / ORCHESTRATOR_RABBITMQ.QUEUE_NAME).
+		// Do not also declare a hardcoded "push_queue" here: a topic exchange
+		// delivers to every queue matching the routing key, so a second binding
+		// on "notification.push" would duplicate each message into a queue that
+		// has no consumer and grows without bound.
 		{
-			name:       cfg.QueueName,  // orchestrator_queue
-			routingKey: cfg.RoutingKey, // notification.* (all notifications)
+			name:       cfg.QueueName,
+			routingKey: cfg.RoutingKey,
 		},
 	}
 

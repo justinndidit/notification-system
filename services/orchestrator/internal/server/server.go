@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/app"
 )
@@ -25,12 +24,14 @@ func New(app *app.App) (*Server, error) {
 }
 
 func (s *Server) SetupHTTPServer(handler http.Handler) {
+	// These are already time.Duration values parsed from strings like "15s".
+	// Multiplying by time.Second again would yield ~475 years.
 	s.httpServer = &http.Server{
 		Addr:         ":" + s.App.Config.Server.Port,
 		Handler:      handler,
-		ReadTimeout:  time.Duration(s.App.Config.Server.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(s.App.Config.Server.WriteTimeout) * time.Second,
-		IdleTimeout:  time.Duration(s.App.Config.Server.IdleTimeout) * time.Second,
+		ReadTimeout:  s.App.Config.Server.ReadTimeout,
+		WriteTimeout: s.App.Config.Server.WriteTimeout,
+		IdleTimeout:  s.App.Config.Server.IdleTimeout,
 	}
 }
 

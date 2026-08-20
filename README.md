@@ -1,354 +1,359 @@
 # Notification System
 
-A production-grade, multi-channel notification platform built as a polyglot microservices monorepo. Designed around an event-driven pipeline with first-class support for reliability, observability, and horizontal scaling.
+A multi-channel notification platform built as a polyglot microservices monorepo — NestJS at the edge, Go for orchestration and push delivery, Django + Celery for email, with RabbitMQ decoupling ingestion from delivery.
 
->Built to explore real-world distributed systems patterns: async task queues, dead-letter handling, circuit breakers, and multi-service orchestration — the kind of infrastructure that powers notification systems at scale.
-
-**Current status:** Core infrastructure and email delivery are in place. The repository is a strong portfolio foundation, but several services still need to be completed before the system is production-ready end to end.
+Built to work through real distributed-systems problems end to end: async task queues, service enrichment, idempotency, retry and dead-letter handling, circuit breakers, and cross-service correlation.
 
 ---
 
-## Quick Summary
+## What it does
 
-| Area | Details |
-|---|---|
-| **What it is** | Multi-channel notification platform with API ingress, orchestration, enrichment, and channel workers |
-| **Primary flows** | Notification request, user/template enrichment, queue fan-out, email/push delivery, status tracking |
-| **Main technologies** | NestJS, Go, Django, Celery, PostgreSQL, Redis, RabbitMQ |
-| **Architecture style** | Event-driven microservices with worker-based async processing |
-| **Portfolio value** | Shows systems design, scalability planning, observability thinking, and polyglot implementation |
+A client submits one notification request. The platform figures out the rest:
 
----
+1. **The API Gateway** authenticates the caller, applies edge concerns, and forwards the request.
+2. **The Orchestrator** assigns a notification ID, records it, and enriches the bare request — fetching the recipient's contact details and delivery preferences from the User Service, and the message template from the Template Service, concurrently.
+3. **RabbitMQ** receives the enriched job on a topic exchange, routed by channel (`notification.email`, `notification.push`).
+4. **Channel workers** consume their own queue independently, deliver the message, retry transient failures with backoff, and dead-letter what they can't deliver.
+5. **Status** is written back to Postgres as a durable event log and cached in Redis for cheap polling.
 
-## Project Status At a Glance
-
-| Component | Status | Progress | What It Means |
-|---|---|---:|---|
-| API Gateway | Partial | 60% | Gateway structure and core edge concerns exist, but the notification flow still needs to be completed |
-| Orchestrator | Partial | 70% | The Go service has the core wiring in place, but its API surface is still incomplete |
-| Email Service | Ready | 100% | This is the most complete service and is the strongest production-ready part of the system |
-| Template Service | Skeleton | 10% | Service exists, but CRUD, rendering, and tests still need to be built |
-| User Service | Skeleton | 10% | Service exists, but profile and preference APIs still need to be implemented |
-| Push Service | Empty | 0% | The service is only a scaffold and still needs the full push pipeline |
-| Integration Tests | Missing | 0% | The end-to-end system flow is not yet protected by automated tests |
-| Observability | Planned | 0% | Tracing, metrics, dashboards, and alerting still need to be added |
-| Infrastructure | Ready | 90% | Local development stack is in place, with Docker Compose and bootstrap scripts available |
+The caller gets a `202 Accepted` immediately. Delivery happens asynchronously, and each channel scales on its own.
 
 ---
 
-## What It Does
+## Project status
 
-Clients submit notification requests through the API Gateway. The orchestrator enriches the request with user and template data, persists state, and publishes work to RabbitMQ. Dedicated workers consume channel-specific queues, process notifications independently, retry transient failures, and report delivery outcomes back to the system.
+**This is a work in progress.** Every service runs; the pipeline between them is not yet connected end to end.
 
-In practical terms: one request enters the system, and the platform handles routing, enrichment, retries, and delivery tracking with minimal coupling between services.
-
----
-
-## Where The Project Is Today
-
-### Implemented
-
-| Service | Status | Notes |
+| Component | State | Notes |
 |---|---|---|
-| API Gateway | Partial | NestJS gateway, auth, proxying, rate limiting foundation |
-| Orchestrator | Partial | Go service with DB, Redis, RabbitMQ, and client wiring |
-| Email Service | Strongest component | Django + Celery email delivery flow, retries, logging, DLQ behavior |
-| Infrastructure | Ready for local development | Docker Compose, Postgres, Redis, RabbitMQ, bootstrap scripts |
+| API Gateway | Working | JWT validation, proxying, correlation/idempotency header injection. Rate limiting is built but not wired up |
+| Orchestrator | Partial | Ingest, enrich, persist, and publish all work. No status/query API yet |
+| User Service | Working | Auth, profiles, preferences, push tokens, Redis caching |
+| Template Service | Working | Full CRUD, versioning, filtering, Handlebars rendering, Redis caching |
+| Push Service | Partial | AMQP consumer + FCM v1 client are built. Doesn't yet receive usable messages |
+| Email Service | Standalone | Complete and works on its own. Not yet connected to the queue or deployed in Compose |
+| Infrastructure | Working | Postgres, Redis, RabbitMQ, pgAdmin via Docker Compose |
+| Tests | Not started | Spec files are scaffolding stubs; no meaningful coverage |
+| Observability | Not started | Structured logs and correlation IDs only — no metrics or tracing |
 
-### Still Incomplete
+**What works today:** you can sign up, authenticate, manage templates and preferences, and submit a notification that gets enriched, persisted, and published to RabbitMQ.
 
-| Service | Gap |
-|---|---|
-| Template Service | CRUD, rendering, validation, tests |
-| User Service | Profile and preference APIs, caching, tests |
-| Push Service | Full implementation, FCM integration, queue consumer |
-| Orchestrator API | Status query and list endpoints, retry tooling |
-| Observability | Tracing, metrics, dashboards, log aggregation |
-| Integration tests | End-to-end test coverage across the whole flow |
+**What doesn't yet:** nothing is delivered at the far end. Email is not attached to the queue, and push messages arrive without device tokens. See [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md) for the full analysis and the plan to close it.
 
 ---
 
-<!-- ## Roadmap
-
-### Phase 1: Complete Core Service APIs
-
-- Finish Template Service CRUD and rendering.
-- Finish User Service profile and preference endpoints.
-- Wire the API Gateway notification endpoints end to end.
-- Add status query support in the orchestrator.
-
-### Phase 2: Complete Push Delivery
-
-- Implement the Push Service from scratch.
-- Add RabbitMQ consumer logic.
-- Integrate FCM delivery.
-- Add retry, idempotency, and status reporting.
-
-### Phase 3: Production Hardening
-
-- Add integration and end-to-end tests.
-- Add OpenTelemetry tracing.
-- Add Prometheus metrics and Grafana dashboards.
-- Add dead-letter replay and admin workflows.
-
-### Phase 4: Portfolio Polish
-
-- Add API documentation.
-- Add deployment/runbook docs.
-- Add architecture visuals for review and presentation.
-- Add a small admin UI if time allows. -->
-
-
-## What I'd Add Next
-
-- OpenTelemetry distributed tracing — correlation IDs exist in logs but traces don't span services yet. Adding OTEL would give end-to-end visibility into the full notification journey.
-- Prometheus + Grafana — queue depth, retry rates, and delivery latency are the key metrics. Currently only logged, not scraped.
-- Complete push service — FCM integration is scaffolded; needs device token management and delivery tracking to match the email service's reliability guarantees.
-- Integration test suite — unit tests exist per service; an end-to-end test harness covering the full API Gateway → Orchestrator → Worker → DLQ path would give confidence for production deployment.
-- Kubernetes manifests — Docker Compose works for local dev; the stateless services (orchestrator, workers) are ready to be replicated behind a load balancer with K8s deployments.
-
----
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 graph TB
-  Client[Client / Admin / Batch Jobs] --> Gateway[API Gateway]
-  Gateway --> Orch[Go Orchestrator]
-  Orch --> UserSvc[User Service]
-  Orch --> TemplateSvc[Template Service]
-  Orch --> Redis[(Redis)]
-  Orch --> DB[(PostgreSQL)]
-  Orch --> MQ[(RabbitMQ Topic Exchange)]
+  Client[Client] --> GW[API Gateway<br/>NestJS :8000]
+  GW --> Orch[Orchestrator<br/>Go :8080]
+  GW --> UserSvc[User Service<br/>NestJS :3007]
+  GW --> TemplateSvc[Template Service<br/>NestJS :3003]
 
-  MQ --> EmailQ[notification.email]
-  MQ --> PushQ[notification.push]
-  MQ --> SmsQ[notification.sms]
+  Orch --> UserSvc
+  Orch --> TemplateSvc
+  Orch --> DB[(PostgreSQL<br/>notification_db)]
+  Orch --> Redis[(Redis<br/>status + idempotency)]
+  Orch --> MQ{{RabbitMQ<br/>topic: notifications}}
 
-  EmailQ --> EmailWorker[Django + Celery]
-  PushQ --> PushWorker[Go Push Worker]
+  MQ -->|notification.email| EmailW[Email Worker<br/>Django + Celery]
+  MQ -->|notification.push| PushW[Push Worker<br/>Go]
 
-  EmailWorker --> EmailDB[(PostgreSQL email logs)]
-  PushWorker --> PushCache[(Redis push cache)]
+  EmailW --> SMTP[SMTP]
+  PushW --> FCM[FCM]
 ```
 
-### Request Flow
+Three ideas carry the design:
 
-```mermaid
-sequenceDiagram
-  actor Client
-  participant GW as API Gateway
-  participant O as Orchestrator
-  participant U as User Service
-  participant T as Template Service
-  participant Q as RabbitMQ
-  participant W as Worker
+- **The gateway stays thin.** It handles auth and edge concerns, then gets out of the way. No business logic at the edge.
+- **The orchestrator owns coordination, not delivery.** It knows how to assemble a complete message; it doesn't know how to send one. Channels stay pluggable.
+- **The queue is the boundary.** Ingestion never blocks on delivery. A failing SMTP host slows the email queue and nothing else.
 
-  Client->>GW: POST /notifications
-  GW->>O: Forward request
-  O->>U: Resolve user data
-  O->>T: Resolve template data
-  O->>Q: Publish enriched job
-  O-->>GW: 202 Accepted
-  Q->>W: Consume message
-  W->>W: Process delivery
-  W->>O: Status callback
-  O->>O: Persist result
-```
-
-### Failure Handling
-
-```mermaid
-graph TD
-  Start[Message received] --> Process[Process job]
-  Process --> Success[Delivered]
-  Process --> Retry[Transient error]
-  Retry --> Backoff[Exponential backoff]
-  Backoff --> Start
-  Retry --> Exhausted[Retries exhausted]
-  Exhausted --> DLQ[Dead-letter queue]
-  DLQ --> Replay[Manual replay / recovery]
-```
-
-## Key design decisions:
-
-- Go for the orchestrator and push worker — high-throughput, low-latency coordination. Goroutines handle concurrent enrichment calls without thread overhead.
-- Django + Celery for email — Celery's task queue gives exponential backoff, max retry limits, and dead-letter routing out of the box, without reinventing the wheel.
-- RabbitMQ topic exchange over direct queues — routing keys like notification.email allow future channels to be added without touching existing consumers.
-- Redis for status caching — notification state is written to Redis on every transition so clients can poll status without hitting Postgres.
-- Dead-letter queue (failed.queue) — exhausted retries land here for manual inspection and replay, not silent drops.
----
-
-## System Design Notes
-
-### Why this architecture works
-
-- The gateway stays thin and protects downstream services.
-- The orchestrator owns workflow coordination instead of business logic leaking into the edge layer.
-- User and template services remain independent so enrichment can evolve separately.
-- RabbitMQ decouples delivery from ingestion, which improves reliability and scaling.
-- Channel workers can scale independently based on load.
-
-### Reliability patterns already reflected in the design
-
-- Async processing for non-blocking request handling.
-- Retry with backoff for transient failures.
-- Dead-letter queues for unrecoverable failures.
-- Idempotency keys to reduce duplicate processing.
-- Correlation IDs for tracing a request across services.
+For component responsibilities, the message topology, the data model, and the reasoning behind each decision, see **[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)**.
 
 ---
 
-## Repository Layout
+## Tech stack
 
-- `api-gateway/` - NestJS entrypoint for auth, throttling, and routing.
-- `services/orchestrator/` - Go service for orchestration, enrichment, persistence, and publish flow.
-- `services/email-service/` - Django + Celery worker for email delivery.
-- `services/push-service/` - Go push worker scaffold.
-- `services/template-service/` - NestJS template management service.
-- `services/user-service/` - NestJS user profile and preference service.
-- `packages/common/` - Shared TypeScript utilities and DTOs.
-- `infra/` - Docker Compose infrastructure.
-- `scripts/` - SQL bootstrap and setup scripts.
-
----
-
-## Tech Stack
-
-### Backend services
-
-- **API Gateway:** NestJS, Express, JWT, Redis throttling
-- **Orchestrator:** Go, Chi, PostgreSQL, RabbitMQ, Redis
-- **Template Service:** NestJS, Prisma, PostgreSQL
-- **User Service:** NestJS, Prisma, PostgreSQL
-- **Email Service:** Django, Celery, PostgreSQL, structured logging
-- **Push Service:** Go, RabbitMQ consumer, FCM
-
-### Infrastructure
-
-- **RabbitMQ** for queueing, routing, and retries
-- **Redis** for status caching and throttling
-- **PostgreSQL** for durable state and logs
-- **Docker Compose** for local development
+| Layer | Choice | Why |
+|---|---|---|
+| Edge | NestJS, Express, Passport JWT | Mature middleware ecosystem, DI, fast to extend |
+| Orchestration | Go, chi, pgx, koanf, zerolog | Concurrent enrichment fan-out with goroutines; low latency under load |
+| Email delivery | Django, Celery, pybreaker | Celery gives backoff, retry limits, and dead-lettering without reinventing them |
+| Push delivery | Go, FCM HTTP v1 | Same reasoning as the orchestrator; shared idioms with the Go codebase |
+| Domain services | NestJS, Prisma | Type-safe data access and migrations |
+| Messaging | RabbitMQ (topic exchange) | Routing keys let new channels be added without touching existing consumers |
+| State | PostgreSQL (partitioned), Redis | Durable event log; Redis for status cache, idempotency keys, throttling |
+| Local dev | Docker Compose | One command for the whole stack |
+| Monorepo | pnpm workspaces + Nx, Go workspaces | Per-language tooling without splitting the repo |
 
 ---
 
-## Local Development
+## Getting started
 
 ### Prerequisites
 
-- Node.js 20+
-- Go 1.21+
-- Python 3.11+
 - Docker and Docker Compose
+- Node.js 20+ and pnpm 10+
+- Go 1.25+
+- Python 3.11+
 
-### Start the infrastructure
+### 1. Configure environment
+
+Each service ships an `.env.example`. Copy the ones you need:
+
+```bash
+cp infra/.env.example infra/.env
+cp api-gateway/.env.example api-gateway/.env
+cp services/orchestrator/.env.example services/orchestrator/.env
+cp services/user-service/.env.example services/user-service/.env
+cp services/template-service/.env.example services/template-service/.env
+cp services/push-service/.env.example services/push-service/.env
+cp services/email-service/.env.example services/email-service/.env
+```
+
+Set at minimum the following in `infra/.env`:
+
+| Variable | Notes |
+|---|---|
+| `JWT_SECRET` | Must be identical across the gateway, user, and template services |
+| `INTERNAL_SERVICE_TOKEN` | Shared secret for service-to-service calls. Required — the orchestrator, user, and template services all refuse to start without it |
+| `DB_PASSWORD` | Postgres password |
+| `RABBITMQ_PASSWORD` | RabbitMQ password |
+| `REDIS_PASSWORD` | Optional; leave unset for a passwordless local Redis |
+
+### 2. Start everything
 
 ```bash
 docker compose -f infra/docker-compose.local.yaml up --build
 ```
 
-### Run the services
+This brings up Postgres (with the three databases created by `scripts/init-databases.sql`), Redis, RabbitMQ, pgAdmin, and the gateway, orchestrator, user, template, and push services. The orchestrator runs its own migrations on boot.
+
+> The email service is not yet in Compose — run it separately (see below).
+
+### 3. Or run services individually
 
 ```bash
-# API Gateway
-cd api-gateway && npm install && npm run start:dev
+pnpm install                    # installs all TypeScript workspaces
 
-# Template Service
-cd services/template-service && npm install && npm run start:dev
+# API Gateway
+pnpm --filter api-gateway start:dev
 
 # User Service
-cd services/user-service && npm install && npm run start:dev
+pnpm --filter user-service start:dev
+
+# Template Service
+pnpm --filter template-service start:dev
 
 # Orchestrator
 cd services/orchestrator && go run cmd/orchestrator/main.go
 
-# Email Service
-cd services/email-service && pip install -r requirements.txt && python manage.py runserver
+# Push Service
+cd services/push-service && go run cmd/push-service/main.go
 
-# Celery worker
+# Email Service
+cd services/email-service
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver 8000
+
+# Celery worker (separate terminal)
 cd services/email-service && celery -A email_service worker -l info
 ```
 
-### Verify health
+### 4. Verify
 
 ```bash
-curl http://localhost:3000/health
-curl http://localhost:8080/health
-curl http://localhost:3003/template-service/health
-curl http://localhost:3007/user-service/health
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health                      # API Gateway
+curl http://localhost:3002/health                      # Orchestrator (mapped from :8080)
+curl http://localhost:3007/user-service/health         # User Service
+curl http://localhost:3003/template-service/health     # Template Service
+curl http://localhost:8000/health/                     # Email Service (when running)
+```
+
+Supporting UIs: RabbitMQ management at `http://localhost:15672`, pgAdmin at `http://localhost:5050`.
+
+---
+
+## Service catalog
+
+### API Gateway — `:8000`
+
+Proxies `/user` → User Service, `/template` → Template Service, `/notifications` → Orchestrator. Injects `X-Correlation-ID` and `X-Idempotency-Key` (generating them when absent) and forwards `x-user-id` on authenticated routes.
+
+The proxy preserves the full request path, so downstream route prefixes must match the gateway mount point — `/user`, `/template`, and `/notifications` all line up with their target service's route prefix.
+
+| Method | Route | Auth |
+|---|---|---|
+| `GET` | `/health` | Public |
+
+### User Service — `:3007`
+
+| Method | Route | Auth |
+|---|---|---|
+| `POST` | `/user/signup` | Public |
+| `POST` | `/user/signin` | Public |
+| `GET` | `/user` | Admin |
+| `GET` | `/user/preference` | Admin |
+| `GET` | `/user/:id` | JWT |
+| `GET` | `/user/preference/:id` | JWT or service token |
+| `PATCH` | `/user/:id/preference` | JWT (self) |
+| `PATCH` | `/user/:id/push-token` | JWT (self) |
+| `PATCH` | `/user/:id/role` | Admin |
+| `GET` | `/user-service/health` | Public |
+
+### Template Service — `:3003`
+
+| Method | Route | Auth |
+|---|---|---|
+| `POST` | `/template` | Admin |
+| `GET` | `/template` | JWT — paginated, filter by `name`/`language`/`event`/`channel` |
+| `GET` | `/template/:id` | JWT or service token — `?history=true` includes all versions |
+| `POST` | `/template/:id/render` | JWT or service token — renders with Handlebars |
+| `GET` | `/template/event/:event/channel/:channel` | JWT or service token |
+| `PATCH` | `/template/:id` | JWT — creates a new version |
+| `DELETE` | `/template/:id` | JWT |
+| `GET` | `/template-service/health` | Public |
+
+### Orchestrator — `:8080` (mapped to `:3002`)
+
+| Method | Route |
+|---|---|
+| `POST` | `/notifications` |
+| `GET` | `/health` |
+
+### Push Service — `:8080`
+
+Consumes `notification.push`. HTTP surface is operational only:
+
+| Method | Route |
+|---|---|
+| `GET` | `/health` |
+| `GET` | `/ready` |
+| `GET` | `/status/:notification_id` |
+
+### Email Service — `:8000`
+
+| Method | Route |
+|---|---|
+| `POST` | `/api/v1/notifications/` |
+| `GET` | `/api/v1/notifications/:request_id/` |
+| `GET` | `/api/v1/notifications/list/` |
+| `GET` | `/health/` |
+
+---
+
+## API usage
+
+All HTTP services return the same envelope:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "message": "Request successful",
+  "meta": {}
+}
+```
+
+### Authenticate
+
+```bash
+curl -X POST http://localhost:8000/user/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.com","password":"secret123"}'
+
+curl -X POST http://localhost:8000/user/signin \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","password":"secret123"}'
+```
+
+### Submit a notification
+
+```bash
+curl -X POST http://localhost:8000/notifications \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'X-Idempotency-Key: req-123' \
+  -d '{
+    "notification_type": "email",
+    "user_id": "<user-uuid>",
+    "template_code": "<template-uuid>",
+    "variables": { "name": "Ada", "link": "https://example.com" },
+    "request_id": "req-123",
+    "priority": 2
+  }'
+```
+
+`X-Idempotency-Key` is required — the orchestrator rejects requests without it. The gateway generates one if the client omits it.
+
+```json
+{
+  "success": true,
+  "message": "Notification accepted and being processed",
+  "data": {
+    "correlation_id": "…",
+    "idempotency_key": "req-123",
+    "status": "processing"
+  }
+}
 ```
 
 ---
 
-## API Examples
+## Repository layout
 
-### Submit a notification
-
-```http
-POST /notifications
-Content-Type: application/json
-Authorization: Bearer <jwt>
 ```
-
-```json
-{
-  "notification_type": "email",
-  "user_id": "user-123",
-  "template_code": "welcome",
-  "variables": {
-    "email": "user@example.com",
-    "name": "John Doe"
-  },
-  "request_id": "req-123"
-}
-```
-
-### Query delivery status
-
-```http
-GET /notifications/{notification_id}
-Authorization: Bearer <jwt>
+├── api-gateway/              NestJS edge service — auth, proxying, throttling
+├── services/
+│   ├── orchestrator/         Go — enrichment, persistence, publishing
+│   │   ├── cmd/              Entrypoint
+│   │   └── internal/         handlers, services, repositories, models, config
+│   ├── user-service/         NestJS + Prisma — users, auth, preferences
+│   ├── template-service/     NestJS + Prisma — templates, versions, rendering
+│   ├── push-service/         Go — AMQP consumer, FCM delivery
+│   └── email-service/        Django + Celery — SMTP delivery, retries, DLQ
+├── packages/common/          Shared TypeScript utilities
+├── infra/                    Docker Compose stacks
+├── scripts/                  Database bootstrap SQL
+├── docs/ARCHITECTURE.md      Architecture reference
+└── PROJECT_CONTEXT.md        Current-state audit and completion plan
 ```
 
 ---
 
 ## Testing
 
-- TypeScript services: `npm run test`, `npm run lint`
-- Go services: `go test ./...`, `gofmt`, `go vet`
-- Django email service: `python manage.py test notifications`
+```bash
+# TypeScript services
+pnpm --filter <service> test
+pnpm --filter <service> lint
 
-### Highest priority testing gap
+# Go services
+cd services/orchestrator && go test ./... && go vet ./...
+cd services/push-service  && go test ./... && go vet ./...
 
-The main missing piece is a full end-to-end test suite that exercises the entire notification lifecycle across gateway, orchestrator, queue, and workers.
+# Email service
+cd services/email-service && python manage.py test notifications
+```
 
----
-
-## Deployment Notes
-
-- Stateless services can be horizontally scaled behind a load balancer.
-- RabbitMQ queues should be durable and monitored for depth.
-- PostgreSQL should use backups and read replicas in production.
-- Redis should be password-protected and highly available in production.
-- Dead-letter queues should be visible in an operations workflow for replay and recovery.
+Test coverage is the largest outstanding gap. The `.spec.ts` files present today are generated scaffolding, not real tests, and some fail to resolve `src/*` imports under Jest. Building out unit tests and an end-to-end harness across gateway → orchestrator → queue → worker is the top priority after the delivery pipeline is connected.
 
 ---
 
+## Roadmap
 
-<!-- ## Contributing Focus Areas
+Sequenced in detail in [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md):
 
-The most valuable next contributions are:
+1. **Connect the pipeline** — resolve recipients and device tokens during enrichment, render templates in the orchestrator, agree one message contract, bridge the email worker onto the queue, and deploy it in Compose.
+2. **Complete the orchestrator API** — status lookup, event timeline, user history, and retry endpoints. The repository layer for these is already written.
+3. **Harden reliability** — transactional outbox, correct idempotency semantics, real dead-letter exchanges, publisher confirms, and scheduled partition maintenance.
+4. **Secure the edge** — move proxying behind Nest guards so auth and rate limiting actually apply.
+5. **Test, then instrument** — real unit and integration coverage, CI, then OpenTelemetry tracing and Prometheus metrics.
 
-- Template Service CRUD and rendering
-- User Service endpoints and preferences
-- Push Service implementation
-- End-to-end test coverage
-- Observability and dashboards
-- Admin tooling for failed-message replay
-
---- -->
+---
 
 ## License
 

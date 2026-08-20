@@ -82,6 +82,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: 24h
 
+      # Shared secret for service-to-service calls (orchestrator enrichment)
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -100,7 +103,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3007/user-service/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -125,6 +128,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: 24h
 
+      # Shared secret for service-to-service calls (orchestrator enrichment)
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -143,7 +149,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3003/template-service/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -192,6 +198,7 @@ services:
       # External Services
       ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS: http://user-service:3007
       ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS: http://template-service:3003
+      ORCHESTRATOR_EXTERNAL.INTERNAL_TOKEN: ${INTERNAL_SERVICE_TOKEN}
 
     ports:
       - "3002:8080"
@@ -259,7 +266,9 @@ services:
       REDIS_DB: "0"
 
     ports:
-      - "8081:8081"
+      # Container listens on 8080 (PORT above); exposed on host 8081 to avoid
+      # colliding with the orchestrator's 8080.
+      - "8081:8080"
     volumes:
       - ../services/push-service:/app
       # Add this line if you have a node_modules or vendor folder
@@ -298,9 +307,9 @@ services:
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: 0
-      REDIS_URL: redis://:password@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
 
       # Rate Limiting
       THROTTLE_TTL: 60
@@ -310,7 +319,7 @@ services:
       USER_SERVICE_URL: http://user-service:3007
       TEMPLATE_SERVICE_URL: http://template-service:3003
       ORCHESTRATOR_SERVICE_URL: http://orchestrator:8080
-      PUSH_SERVICE_URL: http://push-service:8081
+      PUSH_SERVICE_URL: http://push-service:8080
 
       # CORS
       CORS_ORIGIN: "*"
