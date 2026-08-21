@@ -21,10 +21,18 @@ declare interface PaginatedResponse<T> {
   meta: PaginationMeta;
 }
 
-declare interface WebPushSubscription {
-  endpoint: string;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
+declare interface DeviceToken {
+  token: string;
+  platform: 'android' | 'ios';
+}
+
+declare interface DeliveryProfile {
+  user_id: string;
+  name: string;
+  email: string;
+  device_tokens: DeviceToken[];
+  email_opt_in: boolean;
+  push_opt_in: boolean;
+  daily_limit: number;
+  language: string;
 }

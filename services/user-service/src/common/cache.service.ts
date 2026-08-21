@@ -69,6 +69,7 @@ export class CacheService {
     await Promise.all([
       this.delete(`user:${userId}`),
       this.delete(`user:preferences:${userId}`),
+      this.delete(`user:delivery-profile:${userId}`),
     ]);
   }
 }

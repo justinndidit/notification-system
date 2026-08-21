@@ -22,7 +22,7 @@ model User {
   role           String        @default("user")
   created_at     DateTime      @default(now())
   updated_at     DateTime      @updatedAt
-  push_token     Json?   
+  device_tokens  Json?   // [{ token, platform: 'android' | 'ios' }]
   preferences    Preference?
 }
 

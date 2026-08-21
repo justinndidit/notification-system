@@ -3,19 +3,36 @@ import requests
 import pika
 import json
 
-TEMPLATE_SERVICE_URL = os.getenv('TEMPLATE_SERVICE_URL', 'http://template-service:8000/templates/')
-STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://notification_service/api/notifications/status/')
+from .logging_config import celery_logger
+
+# The template service listens on 3003 and serves /template/{id}.
+TEMPLATE_SERVICE_URL = os.getenv('TEMPLATE_SERVICE_URL', 'http://template-service:3003')
+# The orchestrator owns notification status.
+STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://orchestrator:8080/notifications/status')
+INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN', '')
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
 RABBITMQ_PASSWORD = os.getenv('RABBITMQ_PASSWORD', 'guest')
 
 
 def fetch_email_template(template_code):
+    """
+    Fallback path only. Notifications from the orchestrator arrive pre-rendered;
+    this is used by the direct HTTP API, which has no rendering step of its own.
+    """
     try:
-        resp = requests.get(f'http://template-service:8000/templates/{template_code}', timeout=5)
+        resp = requests.get(
+            f'{TEMPLATE_SERVICE_URL}/template/{template_code}',
+            headers={'X-Service-Token': INTERNAL_SERVICE_TOKEN},
+            timeout=5,
+        )
         resp.raise_for_status()
-        data = resp.json()
-        return data.get('template_content', '')
+        payload = resp.json()
+        data = payload.get('data') or {}
+        versions = data.get('versions') or []
+        if versions:
+            return versions[0].get('body', '')
+        return ''
     except Exception:
         return "Hello {name}, \n\n(Template not available) \n\n{link}"
     
@@ -27,9 +44,18 @@ def report_status(notification_id, status, error=None):
     if error:
         payload['error'] = str(error)
     try:
-        requests.post(STATUS_CALLBACK_URL, json=payload, timeout=5)
-    except Exception as e:
-        pass
+        requests.post(
+            STATUS_CALLBACK_URL,
+            json=payload,
+            headers={'X-Service-Token': INTERNAL_SERVICE_TOKEN},
+            timeout=5,
+        )
+    except Exception as exc:
+        # The orchestrator's status endpoint lands in Phase 2. Until then this
+        # call is expected to fail; log it rather than swallowing it silently.
+        celery_logger.warning(
+            f"Status callback failed for {notification_id}: {exc}"
+        )
 
 
 def publish_to_failed_queue(message_body: dict):

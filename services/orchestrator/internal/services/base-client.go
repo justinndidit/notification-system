@@ -1,9 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -34,19 +36,28 @@ func NewBaseHTTPClient(logger *zerolog.Logger, defaultHeaders map[string]string)
 	}
 }
 
-// Shared retry logic
-// BaseHTTPClient
-func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan chan<- dtos.HTTPResponse, errorMsg string) {
-	var body dtos.HTTPResponse // ✅ Decode into HTTPResponse directly
+// execute runs one HTTP request with exponential backoff, decoding the standard
+// envelope every service returns. 4xx is permanent (retrying a bad request only
+// wastes capacity); 5xx and transport errors are retried.
+func (b *BaseHTTPClient) execute(ctx context.Context, method, url string, payload []byte) (dtos.HTTPResponse, error) {
+	var body dtos.HTTPResponse
 
 	operation := func() error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		var reader io.Reader
+		if payload != nil {
+			reader = bytes.NewReader(payload)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, url, reader)
 		if err != nil {
 			return backoff.Permanent(err)
 		}
 
 		for k, v := range b.defaultHeaders {
 			req.Header.Set(k, v)
+		}
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
 		}
 
 		resp, err := b.httpClient.Do(req)
@@ -55,7 +66,6 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		}
 		defer resp.Body.Close()
 
-		// Decode the full HTTPResponse
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return err
 		}
@@ -64,7 +74,7 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 			return backoff.Permanent(fmt.Errorf("client error: %d, %v", resp.StatusCode, resp.Status))
 		}
 
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			return fmt.Errorf("server error: %d", resp.StatusCode)
 		}
 
@@ -74,10 +84,19 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 	backOff := backoff.NewExponentialBackOff()
 	backOff.MaxElapsedTime = 30 * time.Second
 
-	err := backoff.Retry(operation, backoff.WithContext(backOff, ctx))
+	if err := backoff.Retry(operation, backoff.WithContext(backOff, ctx)); err != nil {
+		return dtos.HTTPResponse{}, err
+	}
 
+	return body, nil
+}
+
+// DoWithRetry performs a GET and reports the result on a channel, so several
+// enrichment calls can run concurrently.
+func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan chan<- dtos.HTTPResponse, errorMsg string) {
+	body, err := b.execute(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		b.logger.Error().Err(err).Msg("Request failed after retries")
+		b.logger.Error().Err(err).Str("url", url).Msg("Request failed after retries")
 		resultChan <- dtos.HTTPResponse{
 			Success: false,
 			Error:   err.Error(),
@@ -86,6 +105,15 @@ func (b *BaseHTTPClient) DoWithRetry(ctx context.Context, url string, resultChan
 		return
 	}
 
-	// Send the decoded response
 	resultChan <- body
+}
+
+// PostJSON performs a POST and returns the decoded envelope directly.
+func (b *BaseHTTPClient) PostJSON(ctx context.Context, url string, payload any) (dtos.HTTPResponse, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return dtos.HTTPResponse{}, fmt.Errorf("failed to encode request payload: %w", err)
+	}
+
+	return b.execute(ctx, http.MethodPost, url, encoded)
 }

@@ -95,7 +95,9 @@ if DATABASE_URL:
         'default': dj_database_url.config(
             default=DATABASE_URL,
             conn_max_age=600,
-            ssl_require=True,  # 👈 required on Render/Supabase
+            # Managed providers (Render, Supabase) require SSL; a local Postgres
+            # container does not support it at all, so this cannot be hardcoded.
+            ssl_require=os.getenv('DB_SSL_REQUIRE', 'False').lower() == 'true',
         )
     }
 else:

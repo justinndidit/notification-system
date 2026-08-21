@@ -23,11 +23,11 @@ func NewUserClient(logger *zerolog.Logger, address, serviceToken string) *UserCl
 	}
 }
 
-func (u *UserClient) FetchUserPreference(ctx context.Context, id string, wg *sync.WaitGroup, resultChan chan<- dtos.HTTPResponse) {
+func (u *UserClient) FetchDeliveryProfile(ctx context.Context, id string, wg *sync.WaitGroup, resultChan chan<- dtos.HTTPResponse) {
 	defer wg.Done()
 
-	url := fmt.Sprintf("%s/user/preference/%s", u.userAddress, id)
+	url := fmt.Sprintf("%s/user/%s/delivery-profile", u.userAddress, id)
 
-	u.baseClient.DoWithRetry(ctx, url, resultChan, "Failed to fetch user preferences")
+	u.baseClient.DoWithRetry(ctx, url, resultChan, "Failed to fetch user delivery profile")
 
 }

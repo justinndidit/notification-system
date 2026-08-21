@@ -60,9 +60,23 @@ func (h *NotificationHandler) HandleNotificationRequest(w http.ResponseWriter, r
 		return
 	}
 
+	// The correlation_id column is UUID NOT NULL, so a non-UUID header cannot be
+	// persisted. Reject it here rather than silently substituting a new value,
+	// which would sever the caller's ability to correlate the request.
+	var correlationUUID uuid.UUID
 	if correlationID == "" {
 		h.logger.Warn().Msg("No correlationID, generating...")
-		correlationID = uuid.New().String()
+		correlationUUID = uuid.New()
+		correlationID = correlationUUID.String()
+	} else {
+		parsed, err := uuid.Parse(correlationID)
+		if err != nil {
+			h.logger.Error().Err(err).Str("correlation_id", correlationID).Msg("Invalid X-Correlation-ID header")
+			rb := utils.WriteResponseFailed(nil, err.Error(), "X-Correlation-ID must be a UUID", nil)
+			utils.WriteJson(w, http.StatusBadRequest, rb)
+			return
+		}
+		correlationUUID = parsed
 	}
 
 	// 3. Check idempotency
@@ -98,7 +112,7 @@ func (h *NotificationHandler) HandleNotificationRequest(w http.ResponseWriter, r
 	h.logger.Info().Msg("Passed")
 
 	// 5. Enrich notification data asynchronously
-	go h.orchestrator.EnrichAndPublish(context.Background(), body, correlationID, idempotencyKey)
+	go h.orchestrator.EnrichAndPublish(context.Background(), body, correlationUUID, idempotencyKey)
 
 	// 6. Return immediate response
 	data := map[string]any{

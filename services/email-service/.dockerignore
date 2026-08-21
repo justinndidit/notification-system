@@ -1,0 +1,19 @@
+# Never bake local secrets or state into the image. Without this, `COPY . .`
+# ships the developer's .env — which both leaks credentials and silently
+# overrides container configuration via load_dotenv().
+.env
+.env.*
+!.env.example
+db.sqlite3
+*.sqlite3
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+.git/
+.github/
+*.md

@@ -1,4 +1,7 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
+  ValidateNested,
   IsEmail,
   IsString,
   MinLength,
@@ -22,9 +25,6 @@ export class RegisterDto {
   @MinLength(6, { message: 'Password must be at least 6 characters long' })
   password: string;
 
-  @IsOptional()
-  @IsString()
-  push_token?: string;
 
   // `role` is intentionally absent. Accepting it here let any caller register
   // themselves as an admin. Roles are assigned via PATCH /user/:id/role.
@@ -73,4 +73,19 @@ export class PaginationDto {
   @Min(1)
   @Max(100) // Cap to prevent abuse
   limit?: number = 10;
+}
+
+export class DeviceTokenDto {
+  @IsString()
+  token: string;
+
+  @IsIn(['android', 'ios'], { message: 'Platform must be "android" or "ios"' })
+  platform: 'android' | 'ios';
+}
+
+export class UpdateDeviceTokensDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DeviceTokenDto)
+  device_tokens: DeviceTokenDto[];
 }
