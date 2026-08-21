@@ -48,13 +48,12 @@ export class UpdateTemplateDto extends PartialType(CreateTemplateDto) {
 }
 
 export class RenderTemplateDto {
+  // Handlebars context, e.g. { user: { name: 'John' }, order: { id: '123' } }.
+  // The caller supplies everything the template references; this service does
+  // not look users up. Recipient selection belongs to the orchestrator.
   @IsOptional()
   @IsObject()
-  data?: Record<string, unknown>; // Vars to substitute, e.g., { user: { name: 'John' }, order: { id: '123' } }
-
-  @IsOptional()
-  @IsString()
-  userId?: string; // Target a specific user
+  data?: Record<string, unknown>;
 }
 export class PaginationDto {
   @IsOptional()

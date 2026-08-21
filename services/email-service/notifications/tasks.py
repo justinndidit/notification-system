@@ -128,28 +128,36 @@ def send_email_task(self, payload: dict):
         raise self.retry(exc=exc, countdown=5)
 
     try:
-        # Fetch template with circuit breaker
         template_code = payload.get("template_code")
         variables = payload.get("variables", {})
 
-        template = _fetch_template_with_breaker(template_code, request_id)
+        # Messages arriving from the orchestrator carry content already rendered
+        # against the template's latest version. Only the direct HTTP path needs
+        # this service to fetch and compile a template itself.
+        message_body = payload.get("body")
 
-        # Render template with variable substitution
-        try:
-            message_body = template.format(**variables)
-        except (KeyError, ValueError) as e:
-            celery_logger.warning(
-                f"Template variable substitution failed: {str(e)}",
-                extra={"request_id": request_id, "template_code": template_code},
-            )
-            # Use template as-is if substitution fails
-            message_body = template
+        if not message_body:
+            template = _fetch_template_with_breaker(template_code, request_id)
 
-        to_email = variables.get("email")
+            try:
+                message_body = template.format(**variables)
+            except (KeyError, ValueError) as e:
+                celery_logger.warning(
+                    f"Template variable substitution failed: {str(e)}",
+                    extra={"request_id": request_id, "template_code": template_code},
+                )
+                # Use template as-is if substitution fails
+                message_body = template
+
+        to_email = payload.get("recipient") or variables.get("email")
         if not to_email:
-            raise ValueError("Email address not provided in variables")
+            raise ValueError("No recipient address on the notification")
 
-        subject = variables.get("subject") or f"Notification: {template_code}"
+        subject = (
+            payload.get("subject")
+            or variables.get("subject")
+            or f"Notification: {template_code}"
+        )
 
         # Send email with circuit breaker protection
         _send_email_with_breaker(

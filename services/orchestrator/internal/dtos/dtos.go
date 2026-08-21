@@ -30,6 +30,16 @@ type UserDeliveryProfile struct {
 	Language     string        `json:"language"`
 }
 
+// RenderedContent is one entry from POST /template/{id}/render — the template
+// compiled for a single channel.
+type RenderedContent struct {
+	Channel string `json:"channel"` // EMAIL | PUSH
+	Subject string `json:"subject,omitempty"`
+	HTML    string `json:"html,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Body    string `json:"body,omitempty"`
+}
+
 // DeviceToken is one FCM registration token and the platform it belongs to.
 type DeviceToken struct {
 	Token    string `json:"token"`
@@ -216,7 +226,12 @@ type EnrichedNotification struct {
 	Recipient string `json:"recipient"`
 	// Tokens is populated for push notifications so the worker never has to
 	// look up device registrations itself.
-	Tokens          []DeviceToken      `json:"tokens"`
+	Tokens []DeviceToken `json:"tokens"`
+	// Rendered content. Workers send these verbatim — no template engine
+	// is needed in any channel worker.
+	Subject         string             `json:"subject,omitempty"`
+	Title           string             `json:"title,omitempty"`
+	Body            string             `json:"body,omitempty"`
 	UserPreferences UserPreferenceData `json:"user_preferences"`
 	Template        TemplateData       `json:"template"`
 	Variables       UserData           `json:"variables"`

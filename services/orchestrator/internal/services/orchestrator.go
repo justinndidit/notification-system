@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -271,6 +272,20 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		return
 	}
 
+	// Render the template here so every worker receives finished content and
+	// no channel has to carry a template engine of its own.
+	rendered, err := o.renderForChannel(ctx, req, profile, correlationStr)
+	if err != nil {
+		o.logger.Error().Err(err).Str("correlation_id", correlationStr).Msg("Failed to render template")
+		o.notifRepo.UpdateFailure(ctx, notifID, "RENDER_ERROR", err.Error())
+		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
+			"error": err.Error(),
+			"stage": "render",
+		})
+		o.storeNotificationStatus(ctx, correlationStr, "failed", err.Error())
+		return
+	}
+
 	userPrefs := dtos.UserPreferenceData{
 		UserID:      profile.UserID,
 		EmailOption: profile.EmailOptIn,
@@ -283,6 +298,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	enrichedPayload := models.JSONMap{
 		"user_preferences": userPrefs,
 		"recipient":        recipient,
+		"rendered":         rendered,
 		"template":         template,
 		"variables":        req.Variables,
 	}
@@ -306,6 +322,9 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		Priority:        notification.Priority,
 		Recipient:       recipient,
 		Tokens:          profile.DeviceTokens,
+		Subject:         rendered.Subject,
+		Title:           rendered.Title,
+		Body:            renderedBody(rendered),
 		UserPreferences: userPrefs,
 		Template:        template,
 		Variables:       req.Variables,
@@ -342,6 +361,64 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		Str("correlation_id", correlationStr).
 		Str("notification_id", notifID.String()).
 		Msg("Notification enriched and published successfully")
+}
+
+// renderForChannel asks the template service to compile the template and
+// returns the entry matching this notification's channel.
+func (o *Orchestrator) renderForChannel(
+	ctx context.Context,
+	req dtos.NotificationRequest,
+	profile dtos.UserDeliveryProfile,
+	correlationStr string,
+) (dtos.RenderedContent, error) {
+	renderContext := map[string]any{
+		"user": map[string]any{
+			"id":    profile.UserID,
+			"name":  profile.Name,
+			"email": profile.Email,
+		},
+		"name": req.Variables.Name,
+		"link": req.Variables.Link,
+	}
+	for k, v := range req.Variables.Meta {
+		renderContext[k] = v
+	}
+
+	resp, err := o.templateClient.RenderTemplate(ctx, req.TemplateCode, renderContext)
+	if err != nil {
+		return dtos.RenderedContent{}, err
+	}
+	if !resp.Success {
+		return dtos.RenderedContent{}, fmt.Errorf("template service rejected render: %s", resp.Error)
+	}
+
+	var entries []dtos.RenderedContent
+	raw, _ := json.Marshal(resp.Data)
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return dtos.RenderedContent{}, fmt.Errorf("invalid render response: %w", err)
+	}
+
+	want := strings.ToUpper(string(req.NotificationType))
+	for _, entry := range entries {
+		if strings.ToUpper(entry.Channel) == want {
+			return entry, nil
+		}
+	}
+
+	o.logger.Warn().
+		Str("correlation_id", correlationStr).
+		Str("channel", string(req.NotificationType)).
+		Msg("Template does not declare this channel")
+
+	return dtos.RenderedContent{}, fmt.Errorf("template %s declares no %s content", req.TemplateCode, req.NotificationType)
+}
+
+// renderedBody picks the body field appropriate to the channel that produced it.
+func renderedBody(r dtos.RenderedContent) string {
+	if r.HTML != "" {
+		return r.HTML
+	}
+	return r.Body
 }
 
 // channelAllowed reports whether the user has consented to this channel.

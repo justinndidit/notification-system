@@ -3,7 +3,8 @@
 > Working context document. Written from a full read of the codebase on 2026-08-20 (branch `chore/readme`, HEAD `e00b765`).
 > This describes **what is actually in the code**, not what the README claims. Where the two disagree, this file wins.
 >
-> **Phase 0 (§7) is complete** — items marked ✅ below are fixed in the working tree. Everything else stands as written.
+> **Phase 0 is complete** (committed `9a099c2`). **Phase 1 is largely complete** and uncommitted.
+> Items marked ✅ below are fixed. Everything else stands as written.
 
 ---
 
@@ -67,7 +68,7 @@ Also inaccurate in the README: "unit tests exist per service" (they don't), "Ide
 
 Every service works in isolation. **No end-to-end flow completes.** The breaks below are independent of one another; §3.1 and §3.2 are the two that remain after Phase 0.
 
-### 3.1 Email is fully disconnected (three separate breaks)
+### 3.1 Email is fully disconnected (three separate breaks) ✅ FIXED
 
 **a) Queue name mismatch.** The orchestrator declares and binds `email_queue` → routing key `notification.email` (`internal/config/config.go:276`). Celery consumes `email.queue` (`email_service/celery.py`, `task_default_queue`). Different queues. `email_queue` accumulates messages forever with no consumer.
 
@@ -80,7 +81,7 @@ Additional email-side breakage, independent of the above:
 - `report_status()` POSTs to `http://notification_service/api/notifications/status/` — a host that exists nowhere in this repo, and the orchestrator has no status-callback route. Every callback fails silently (`except: pass`).
 - The DLQ publishes to exchange `notifications.direct` — a different exchange from the main `notifications` topic exchange. Isolated from the rest of the topology.
 
-### 3.2 Push receives messages it cannot use
+### 3.2 Push receives messages it cannot use ✅ FIXED
 
 The orchestrator publishes `dtos.EnrichedNotification` (user_id, template, user_preferences, variables). The push service unmarshals into `PushNotificationMessage`, which requires `Tokens []DeviceToken`. **The orchestrator never populates device tokens** — it doesn't fetch them, and `EnrichedNotification` has no such field.
 
@@ -129,7 +130,49 @@ Guards are now declared per route rather than on the class: mutating routes keep
 
 The NestJS health routes are namespaced by controller prefix — `/user-service/health` and `/template-service/health` — but Compose probed bare `/health` on both. Both containers were therefore permanently reported unhealthy.
 
-### 3.8 Push service port mismatch ✅ FIXED
+### 3.8 Template rendering could never succeed ✅ FIXED
+
+Found while wiring the orchestrator to `POST /template/{id}/render`. The render
+endpoint resolved its own recipients from **template-service's** `User` table —
+a byte-identical copy of the user-service schema that nothing ever writes to.
+With no `userId` it queried an empty table and threw `404 No eligible recipients
+found`; with one it threw `404 User not found`. The endpoint could not return a
+successful response under any input.
+
+It also duplicated the consent logic the orchestrator now owns.
+
+Rendering is now pure: template plus supplied context in, compiled content out.
+`resolveTargetUsers`, `getEligibleChannelsForUser` and `mapRecipient` were
+unreachable once recipient selection moved out, and were removed along with
+`RenderTemplateDto.userId`.
+
+### 3.9 The email service could not be containerised ✅ FIXED
+
+Two things blocked the image build, both invisible until it was attempted:
+
+- `requirements.txt` was UTF-16LE with a BOM and CRLF line endings. `pip install -r`
+  cannot parse that.
+- `settings.py` imports `dj_database_url`, which was not in `requirements.txt` at all.
+
+### 3.10 Both Go images failed to build on an unpinned tool ✅ FIXED
+
+Found on the first real `docker compose up --build`. Both Go `Dockerfile.dev`s ran
+`go install github.com/air-verse/air@latest`. `air` has since released v1.67.4,
+which requires Go >= 1.26, while the base image is `golang:1.25-alpine`:
+
+```
+go: github.com/air-verse/air@latest: github.com/air-verse/air@v1.67.4
+    requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)
+```
+
+Neither Go service could be containerised, with no change to the repository —
+an unpinned `@latest` broke the build on someone else's release schedule. Now
+pinned to `air@v1.61.7`.
+
+Worth noting this was invisible to every static check: both services pass
+`go build`, `go vet` and `gofmt`. Only actually building the image surfaced it.
+
+### 3.11 Push service port mismatch ✅ FIXED
 
 `PORT: "8080"` in compose, but the port mapping is `8081:8081` and the gateway is configured with `PUSH_SERVICE_URL: http://push-service:8081`. The container listens on 8080. The healthcheck (`curl localhost:8080`) passes internally, but nothing external can reach it.
 
@@ -266,7 +309,7 @@ Small, independent, no design decisions needed. All items applied and verified.
 3. ✅ Restore `@UseGuards(JwtAuthGaurd)` on `GET /user/preference/:id` and pass a service-to-service token from the orchestrator. *(§4.6)*
 4. ✅ Add `/health` to the gateway's public-route list, or introduce a `@Public()` decorator and have `JwtAuthGuard` consult its `Reflector`. *(§3.5)*
 5. ✅ Fix the timeout multiplication in `server.go:29-33` — drop `* time.Second`. *(§5.4)*
-6. ✅ Fix the push-service port: make compose map `8081:8080`, or set `PORT: 8081`. Align `PUSH_SERVICE_URL`. *(§3.8)*
+6. ✅ Fix the push-service port: make compose map `8081:8080`, or set `PORT: 8081`. Align `PUSH_SERVICE_URL`. *(§3.11)*
 7. ✅ Reconcile the three Redis passwords in compose to a single `${REDIS_PASSWORD}`. *(§4.8)*
 8. ✅ Delete the `push_queue` binding from `config.go` — keep only the configured queue name. *(§3.3)*
 9. ✅ Add `baseUrl`/`paths` to the base `tsconfig.json` and a jest `moduleNameMapper` so `npm test` and editors resolve `src/*`. *(§1)*

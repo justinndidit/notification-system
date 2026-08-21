@@ -12,7 +12,10 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      # Host port is configurable so this stack can coexist with another
+      # Postgres already bound to 5432. Services talk to it on 5432 over the
+      # compose network regardless of what is published here.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
@@ -103,7 +106,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3007/user-service/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3007/user-service/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -149,7 +152,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/template-service/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/template-service/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -341,11 +344,122 @@ services:
       orchestrator:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+
+  # Email Service (Django) — HTTP API
+  email-service:
+    build:
+      context: ../services/email-service
+      dockerfile: Dockerfile.dev
+    container_name: email-service
+    restart: unless-stopped
+    environment: &email-env
+      DJANGO_SETTINGS_MODULE: email_service.settings
+      DEBUG: "True"
+      SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-insecure-key}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/email_service_db
+      DB_SSL_REQUIRE: "False"
+
+      # SMTP — MailHog captures everything locally, so no real mail is sent
+      EMAIL_HOST: mailhog
+      EMAIL_PORT: "1025"
+      EMAIL_USE_TLS: "False"
+      EMAIL_HOST_USER: ""
+      EMAIL_HOST_PASSWORD: ""
+      EMAIL_FROM: noreply@notification-system.local
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+
+      # Explicit, so nothing falls back to Celery's localhost defaults
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: ""
+
+      NOTIFICATIONS_EXCHANGE: notifications
+      EMAIL_QUEUE: email_queue
+      EMAIL_ROUTING_KEY: notification.email
+
+      TEMPLATE_SERVICE_URL: http://template-service:3003
+      STATUS_CALLBACK_URL: http://orchestrator:8080/notifications/status
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8003:8000"
+    volumes:
+      - ../services/email-service:/app
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+
+  # Celery worker — performs the actual SMTP delivery, with retries and DLQ
+  email-worker:
+    build:
+      context: ../services/email-service
+      dockerfile: Dockerfile.dev
+    container_name: email-worker
+    restart: unless-stopped
+    environment: *email-env
+    command: celery -A email_service worker -l info
+    volumes:
+      - ../services/email-service:/app
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      email-service:
+        condition: service_started
+
+  # Queue bridge — reads the orchestrator's email_queue and dispatches to Celery.
+  # Celery speaks its own wire protocol, so a raw contract message cannot
+  # dispatch as a task without this translation step.
+  email-bridge:
+    build:
+      context: ../services/email-service
+      dockerfile: Dockerfile.dev
+    container_name: email-bridge
+    restart: unless-stopped
+    environment: *email-env
+    command: python manage.py consume_notifications
+    volumes:
+      - ../services/email-service:/app
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      email-service:
+        condition: service_started
+
+  # MailHog — captures outbound mail so local runs never send real email.
+  # SMTP on 1025, web UI on 8025.
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - backend
 
   # ==================== Admin/Monitoring Services ====================
 

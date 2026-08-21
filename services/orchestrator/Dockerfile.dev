@@ -2,8 +2,12 @@ FROM golang:1.25-alpine
 
 WORKDIR /app
 
-# Install air for hot reload
-RUN go install github.com/air-verse/air@latest
+# air gives hot reload. Install the prebuilt binary rather than `go install`:
+# building air from source compiles its Hugo dependency, which is enormous and
+# was timing out here. Pinned so the build does not drift with air's releases.
+RUN apk add --no-cache ca-certificates curl git \
+    && curl -sSfL https://raw.githubusercontent.com/air-verse/air/master/install.sh \
+       | sh -s -- -b /usr/local/bin v1.61.7
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -12,7 +16,7 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-EXPOSE 3002
+EXPOSE 8080
 
 # Run with air for hot reload
 CMD ["air", "-c", ".air.toml"]

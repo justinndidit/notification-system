@@ -8,6 +8,7 @@
 CREATE DATABASE user_service_db;
 CREATE DATABASE template_service_db;
 CREATE DATABASE notification_db;
+CREATE DATABASE email_service_db;
 
 -- =====================================================
 -- 2. APPLY EXTENSIONS AND FUNCTIONS TO EACH DB
@@ -64,3 +65,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Completed setup! Services will now run their migrations to create tables.
+
+-- Connect to email_service_db
+\c email_service_db;
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
