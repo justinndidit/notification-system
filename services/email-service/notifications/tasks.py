@@ -96,6 +96,11 @@ def send_email_task(self, payload: dict):
                 f"Email already delivered (idempotency)",
                 extra={"request_id": request_id},
             )
+            # Still report back. A retry of an already-delivered message is a
+            # no-op here, but the orchestrator has moved the notification to
+            # "queued" and would otherwise sit there forever waiting for an
+            # outcome that is never coming.
+            report_status(payload.get("notification_id"), "delivered")
             return {"status": "already_delivered", "request_id": request_id}
     except Exception as exc:
         celery_logger.error(
@@ -179,7 +184,7 @@ def send_email_task(self, payload: dict):
         )
 
         # Report status
-        report_status(request_id, "delivered")
+        report_status(payload.get("notification_id"), "delivered")
 
         return {"status": "delivered", "request_id": request_id}
 
@@ -210,7 +215,7 @@ def send_email_task(self, payload: dict):
                 )
 
             try:
-                report_status(request_id, "failed", error=str(exc))
+                report_status(payload.get("notification_id"), "failed", error=str(exc))
             except Exception as status_exc:
                 celery_logger.error(
                     f"Failed to report status: {str(status_exc)}",

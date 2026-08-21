@@ -294,23 +294,6 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		Language:    profile.Language,
 	}
 
-	// Store enriched payload in database
-	enrichedPayload := models.JSONMap{
-		"user_preferences": userPrefs,
-		"recipient":        recipient,
-		"rendered":         rendered,
-		"template":         template,
-		"variables":        req.Variables,
-	}
-
-	if err := o.notifRepo.UpdateEnrichedPayload(ctx, notifID, enrichedPayload); err != nil {
-		o.logger.Error().Err(err).Msg("Failed to update enriched payload")
-		return
-	}
-
-	// Record enriched event
-	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventEnriched, nil)
-
 	// Build enriched notification for queue
 	enrichedNotification := dtos.EnrichedNotification{
 		NotificationID:  notifID.String(),
@@ -331,6 +314,18 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		Metadata:        req.MetaData,
 		CreatedAt:       time.Now(),
 	}
+
+	// Persist the exact message that goes on the queue, so a retry can republish
+	// it verbatim rather than re-deriving it from data that may since have changed.
+	if payload, err := toJSONMap(enrichedNotification); err != nil {
+		o.logger.Error().Err(err).Msg("Failed to encode enriched payload")
+	} else if err := o.notifRepo.UpdateEnrichedPayload(ctx, notifID, payload, recipient); err != nil {
+		o.logger.Error().Err(err).Msg("Failed to update enriched payload")
+		return
+	}
+
+	// Record enriched event
+	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventEnriched, nil)
 
 	// Publish to RabbitMQ
 	if err := o.publishToQueue(ctx, enrichedNotification); err != nil {
@@ -419,6 +414,21 @@ func renderedBody(r dtos.RenderedContent) string {
 		return r.HTML
 	}
 	return r.Body
+}
+
+// toJSONMap round-trips a value through JSON so it can be stored in a JSONB column.
+func toJSONMap(v any) (models.JSONMap, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+
+	var out models.JSONMap
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }
 
 // channelAllowed reports whether the user has consented to this channel.

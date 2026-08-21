@@ -68,18 +68,22 @@ func (j JSONMap) Value() (driver.Value, error) {
 	return json.Marshal(j)
 }
 
+// Scan implements sql.Scanner. pgx returns JSONB as []byte or string depending
+// on the codec, so both are handled.
 func (j *JSONMap) Scan(value interface{}) error {
 	if value == nil {
 		*j = nil
 		return nil
 	}
 
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("failed to unmarshal JSONMap: %v", value)
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, j)
+	case string:
+		return json.Unmarshal([]byte(v), j)
+	default:
+		return fmt.Errorf("failed to unmarshal JSONMap: unsupported type %T", value)
 	}
-
-	return json.Unmarshal(bytes, j)
 }
 
 // Update Notification struct to use JSONMap
