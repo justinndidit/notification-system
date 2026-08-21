@@ -1,0 +1,7 @@
+# These build from their own directory, so they need their own ignore list.
+tmp/
+.env
+.env.*
+!.env.example
+*.md
+.git
