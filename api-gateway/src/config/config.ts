@@ -7,4 +7,7 @@ export default () => ({
   pushServiceUrl: process.env.PUSH_SERVICE_URL,
   redisUrl: process.env.REDIS_URL,
   jwtSecret: process.env.JWT_SECRET,
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  throttleTtl: parseInt(process.env.THROTTLE_TTL || '60', 10),
+  throttleLimit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
 });

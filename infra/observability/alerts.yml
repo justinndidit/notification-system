@@ -1,0 +1,75 @@
+groups:
+  - name: notification-delivery
+    rules:
+      # Outbox depth is the earliest signal that delivery has stalled: it climbs
+      # while everything still reports healthy, because publishing is what
+      # stopped, not accepting.
+      - alert: OutboxBacklogGrowing
+        expr: notification_outbox_entries{status="pending"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox backlog is growing ({{ $value }} pending)"
+          description: >-
+            Messages are being accepted but not published. Check the broker and
+            the orchestrator's publisher loop.
+
+      # Entries here have exhausted their retries. Any sustained value means
+      # notifications are being dropped on the floor.
+      - alert: OutboxEntriesFailed
+        expr: notification_outbox_entries{status="failed"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} outbox entries have exhausted their retries"
+
+      - alert: DeadLetterQueueGrowing
+        expr: rabbitmq_detailed_queue_messages{queue="notifications.dlq"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} messages in the dead-letter queue"
+          description: >-
+            Messages exhausted their retries. Inspect them before replaying.
+
+      - alert: ChannelQueueBacklog
+        expr: rabbitmq_detailed_queue_messages{queue=~"email_queue|push_notifications"} > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.queue }} has {{ $value }} unconsumed messages"
+          description: "Workers may be down or too slow for the arrival rate."
+
+      - alert: EnrichmentFailureRate
+        expr: >-
+          sum(rate(notification_enrichment_total{result="failure"}[5m]))
+          /
+          sum(rate(notification_enrichment_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 10% of enrichments are failing"
+          description: "Check the stage label to see which downstream call is failing."
+
+      - alert: DependencyDown
+        expr: notification_dependency_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Orchestrator dependency {{ $labels.dependency }} is unreachable"
+
+      # Should be flat at zero. Sustained recoveries mean processes are dying
+      # mid-enrichment.
+      - alert: NotificationsBeingRecovered
+        expr: rate(notification_recovered_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The recovery sweeper is picking up abandoned notifications"

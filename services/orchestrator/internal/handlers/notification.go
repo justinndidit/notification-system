@@ -9,6 +9,7 @@ import (
 	redis "github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/services"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/utils"
 	"github.com/rs/zerolog"
@@ -90,6 +91,7 @@ func (h *NotificationHandler) HandleNotificationRequest(w http.ResponseWriter, r
 	}
 
 	if !claimed {
+		metrics.DuplicatesSuppressed.Inc()
 		h.logger.Info().Str("key", idempotencyKey).Msg("Duplicate request detected")
 
 		data := map[string]any{

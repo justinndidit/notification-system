@@ -1,0 +1,372 @@
+{
+  "uid": "notification-system",
+  "title": "Notification System",
+  "tags": [
+    "notifications"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Outbox depth",
+      "type": "timeseries",
+      "description": "Leading indicator. Rises as soon as publishing stalls, before anything is marked failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "notification_outbox_entries{status=\"pending\"}",
+          "legendFormat": "pending",
+          "refId": "A"
+        },
+        {
+          "expr": "notification_outbox_entries{status=\"failed\"}",
+          "legendFormat": "failed",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Queue depth",
+      "type": "timeseries",
+      "description": "Unconsumed messages per channel queue, plus the dead-letter queue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rabbitmq_detailed_queue_messages{queue=~\"email_queue|push_notifications|notifications.dlq\"}",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Throughput by channel",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (channel) (rate(notification_received_total[5m]))",
+          "legendFormat": "received {{channel}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (channel) (rate(notification_publish_total{result=\"success\"}[5m]))",
+          "legendFormat": "published {{channel}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Enrichment failures by stage",
+      "type": "timeseries",
+      "description": "The stage label says which downstream call broke: user fetch, template fetch, render or recipient resolution.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage) (rate(notification_enrichment_total{result=\"failure\"}[5m]))",
+          "legendFormat": "{{stage}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Enrichment latency",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(notification_enrichment_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(notification_enrichment_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(notification_enrichment_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Publish latency (incl. broker confirm)",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(notification_publish_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(notification_publish_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(notification_publish_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Status transitions",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(notification_status_transitions_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Retries and recoveries",
+      "type": "timeseries",
+      "description": "Recoveries should be flat at zero. Anything sustained means processes are dying mid-enrichment.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (origin) (rate(notification_retries_total[5m]))",
+          "legendFormat": "retry {{origin}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(notification_recovered_total[5m])",
+          "legendFormat": "recovered",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Dependencies",
+      "type": "stat",
+      "description": "1 healthy, 0 unreachable.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "notification_dependency_up",
+          "legendFormat": "{{dependency}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Duplicates suppressed",
+      "type": "timeseries",
+      "description": "A sudden rise usually means a client is retrying in a loop.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(notification_duplicates_suppressed_total[5m])",
+          "legendFormat": "duplicates",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

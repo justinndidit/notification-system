@@ -1,153 +1,31 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/interceptors/response.interceptors';
-import config from './config/config';
 import { LoggingInterceptor } from './middleware/logging.interceptor';
-import { ProxyMiddleware } from './middleware/proxy.middleware';
-import { Response, NextFunction, Request } from 'express';
-import { JwtHelper } from './common/jwt-helper';
-import { v4 as uuidv4 } from 'uuid';
+import config from './config/config';
 
-const { port, userServiceUrl, orchestratorUrl, templateServiceUrl } =
+const { port, userServiceUrl, orchestratorUrl, templateServiceUrl, corsOrigin } =
   config();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
   });
-  // Enable CORS
+
   app.enableCors({
-    origin: 'http://localhost:3000', // Allowed origins
+    origin: corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
     credentials: true,
   });
 
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
-
   app.useGlobalInterceptors(new LoggingInterceptor());
-
-  // Error filter
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  // Set up proxy routes for user and template services
-  const proxyMiddleware = app.get(ProxyMiddleware);
-  const jwtHelper = app.get(JwtHelper);
-  const proxyRoutes = [
-    {
-      path: '/user',
-      target: userServiceUrl,
-      requireAuth: (req: Request) => {
-        // public routes that don't require authentication
-        // Check both full path and path without prefix (Express strips prefix in middleware)
-        const originalUrl = req.originalUrl || req.url || '';
-        const url = req.url || '';
-        const requestPath = originalUrl.split('?')[0];
-        const relativePath = url.split('?')[0];
-
-        const publicPaths = [
-          '/user/signup',
-          '/user/signin',
-          '/signup',
-          '/signin',
-        ];
-
-        const isPublic = publicPaths.some((publicPath) => {
-          return (
-            requestPath === publicPath ||
-            requestPath.startsWith(publicPath + '/') ||
-            relativePath === publicPath ||
-            relativePath.startsWith(publicPath + '/') ||
-            requestPath.includes('signin') ||
-            requestPath.includes('signup')
-          );
-        });
-
-        // Return true if route requires auth (i.e., NOT public)
-        return !isPublic;
-      },
-      extraHeaders: undefined,
-    },
-    {
-      path: '/template',
-      target: templateServiceUrl,
-      requireAuth: () => true, // all template routes require authentication
-      extraHeaders: undefined,
-    },
-    {
-      path: '/notifications',
-      target: orchestratorUrl,
-      requireAuth: () => true, // all orchestrator routes require authentication
-      extraHeaders: (req: UserRequest) => {
-        const resolveHeaderValue = (
-          value: string | string[] | undefined,
-        ): string | undefined => {
-          if (Array.isArray(value)) {
-            return value.find(
-              (item) => typeof item === 'string' && item.trim().length > 0,
-            );
-          }
-          return typeof value === 'string' && value.trim().length > 0
-            ? value
-            : undefined;
-        };
-
-        const existingIdempotencyKey = resolveHeaderValue(
-          req.headers['x-idempotency-key'] as string | string[] | undefined,
-        );
-        const existingCorrelationId = resolveHeaderValue(
-          req.headers['x-correlation-id'] as string | string[] | undefined,
-        );
-
-        return {
-          'X-Idempotency-Key': existingIdempotencyKey ?? uuidv4(),
-          'X-Correlation-ID': existingCorrelationId ?? uuidv4(),
-        };
-      },
-    },
-  ];
-
-  // Register proxy routes
-  proxyRoutes.forEach(({ path, target, requireAuth, extraHeaders }) => {
-    app.use(path, (req: Request, res: Response, next: NextFunction) => {
-      // Validate JWT token and set user if present (for authenticated routes)
-      const userReq = req as unknown as UserRequest;
-      const token = jwtHelper.extractTokenFromRequest(req);
-
-      if (token) {
-        const payload = jwtHelper.validateToken(token);
-        if (payload) {
-          userReq.user = {
-            userId: payload.user_id,
-          };
-        }
-      }
-
-      proxyMiddleware.use(userReq, res, next);
-
-      // Execute the proxy function immediately after it's set up
-      if (userReq.proxy) {
-        const addUserHeader = requireAuth(req);
-        try {
-          userReq.proxy(target!, path, addUserHeader, { extraHeaders });
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Unknown error';
-          console.error(`Error executing proxy: ${errorMessage}`);
-          if (!res.headersSent) {
-            res.status(500).json({
-              success: false,
-              message: 'Proxy execution error',
-              error: errorMessage,
-            });
-          }
-        }
-      } else {
-        // If proxy function wasn't set up, continue to next middleware
-        next();
-      }
-    });
-  });
-
+  // Proxying is handled by controllers in ProxyModule rather than raw
+  // app.use() middleware. Middleware registered here would run before Nest's
+  // router, so the global JwtAuthGuard and ThrottlerGuard would never see
+  // proxied traffic — which is exactly what used to happen.
   await app.listen(port ?? 3000);
 
   console.log(`\n🚀 API Gateway is running on port ${port || 3000}`);

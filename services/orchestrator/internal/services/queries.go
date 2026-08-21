@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/repositories"
 )
@@ -163,6 +164,8 @@ func (o *Orchestrator) RecordDeliveryStatus(ctx context.Context, req dtos.Status
 	o.eventRepo.CreateEventSimple(ctx, notifID, notif.CorrelationID, eventType, eventData)
 	o.storeNotificationStatus(ctx, notif.CorrelationID.String(), status, req.Error)
 
+	metrics.StatusTransitions.WithLabelValues(status).Inc()
+
 	o.logger.Info().
 		Str("notification_id", req.NotificationID).
 		Str("correlation_id", notif.CorrelationID.String()).
@@ -216,6 +219,9 @@ func (o *Orchestrator) RetryNotification(ctx context.Context, id uuid.UUID) (*dt
 		"retry_count":     notif.RetryCount,
 	})
 	o.storeNotificationStatus(ctx, notif.CorrelationID.String(), dtos.StatusQueued, "")
+
+	metrics.RetriesTotal.WithLabelValues("api").Inc()
+	metrics.StatusTransitions.WithLabelValues(dtos.StatusQueued).Inc()
 
 	o.logger.Info().
 		Str("notification_id", id.String()).

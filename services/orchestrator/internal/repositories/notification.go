@@ -692,3 +692,83 @@ func (r *NotificationRepository) SoftDelete(ctx context.Context, id uuid.UUID) e
 
 	return nil
 }
+
+// MarkQueuedTx records the enrichment result and moves the notification to
+// "queued" inside the caller's transaction.
+//
+// created_at is required because notifications is range-partitioned on it:
+// including it lets Postgres prune to a single partition instead of scanning
+// the whole window.
+func (r *NotificationRepository) MarkQueuedTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	id uuid.UUID,
+	createdAt time.Time,
+	payload models.JSONMap,
+	recipient string,
+) error {
+	query := `
+		UPDATE notifications
+		SET enriched_payload = $1,
+		    recipient = NULLIF($2, ''),
+		    status = 'queued',
+		    enriched_at = COALESCE(enriched_at, NOW()),
+		    queued_at = COALESCE(queued_at, NOW()),
+		    updated_at = NOW()
+		WHERE id = $3 AND created_at = $4 AND deleted_at IS NULL
+	`
+
+	result, err := tx.Exec(ctx, query, payload, recipient, id, createdAt)
+	if err != nil {
+		return fmt.Errorf("failed to mark notification queued: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// FindStuck returns notifications that entered enrichment and never left it,
+// so a sweeper can pick up work abandoned by a process that died mid-flight.
+func (r *NotificationRepository) FindStuck(ctx context.Context, olderThan time.Duration, limit int) ([]models.Notification, error) {
+	query := `
+		SELECT
+			id, user_id, template_id, correlation_id, idempotency_key,
+			channel, status, priority, variables, metadata, enriched_payload,
+			recipient, enriched_at, queued_at, sent_at, delivered_at, failed_at,
+			error_code, error_message, retry_count, max_retries,
+			provider, provider_message_id, created_at, updated_at, deleted_at
+		FROM notifications
+		WHERE status IN ('pending', 'enriching')
+		  AND updated_at < NOW() - $1::interval
+		  AND deleted_at IS NULL
+		ORDER BY created_at
+		LIMIT $2
+	`
+
+	interval := fmt.Sprintf("%d seconds", int(olderThan.Seconds()))
+
+	rows, err := r.pool.Query(ctx, query, interval, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find stuck notifications: %w", err)
+	}
+	defer rows.Close()
+
+	notifications := make([]models.Notification, 0)
+	for rows.Next() {
+		var n models.Notification
+		if err := rows.Scan(
+			&n.ID, &n.UserID, &n.TemplateID, &n.CorrelationID, &n.IdempotencyKey,
+			&n.Channel, &n.Status, &n.Priority, &n.Variables, &n.Metadata, &n.EnrichedPayload,
+			&n.Recipient, &n.EnrichedAt, &n.QueuedAt, &n.SentAt, &n.DeliveredAt, &n.FailedAt,
+			&n.ErrorCode, &n.ErrorMessage, &n.RetryCount, &n.MaxRetries,
+			&n.Provider, &n.ProviderMsgID, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan stuck notification: %w", err)
+		}
+		notifications = append(notifications, n)
+	}
+
+	return notifications, rows.Err()
+}

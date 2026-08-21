@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/database"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/utils"
 	"github.com/rs/zerolog"
 )
@@ -49,14 +50,15 @@ func (h *HealthHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request
 			"error":         err.Error(),
 		}
 		isHealthy = false
+		metrics.DependencyUp.WithLabelValues("database").Set(0)
 		h.logger.Error().Err(err).Dur("response_time", time.Since(dbStart)).Msg("database health check failed")
-		//TODO:observability
 	} else {
+		metrics.DependencyUp.WithLabelValues("database").Set(1)
 		checks["database"] = map[string]interface{}{
 			"status":        "healthy",
 			"response_time": time.Since(dbStart).String(),
 		}
-		h.logger.Info().Dur("response_time", time.Since(dbStart)).Msg("database health check passed")
+		h.logger.Debug().Dur("response_time", time.Since(dbStart)).Msg("database health check passed")
 	}
 
 	if h.redisClient != nil {
@@ -70,13 +72,15 @@ func (h *HealthHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request
 				"response_time": time.Since(redisStart).String(),
 				"error":         err.Error(),
 			}
+			metrics.DependencyUp.WithLabelValues("redis").Set(0)
 			h.logger.Error().Err(err).Dur("response_time", time.Since(redisStart)).Msg("redis health check failed")
 		} else {
+			metrics.DependencyUp.WithLabelValues("redis").Set(1)
 			checks["redis"] = map[string]interface{}{
 				"status":        "healthy",
 				"response_time": time.Since(redisStart).String(),
 			}
-			h.logger.Info().Dur("response_time", time.Since(redisStart)).Msg("redis health check passed")
+			h.logger.Debug().Dur("response_time", time.Since(redisStart)).Msg("redis health check passed")
 		}
 	}
 
@@ -89,7 +93,8 @@ func (h *HealthHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.logger.Info().
+	// Probes hit this constantly; logging every pass at INFO buries real events.
+	h.logger.Debug().
 		Dur("total_duration", time.Since(start)).
 		Msg("health check passed")
 

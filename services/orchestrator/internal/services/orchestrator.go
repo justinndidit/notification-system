@@ -11,7 +11,9 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/config"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/repositories"
 	"github.com/rs/zerolog"
@@ -31,6 +33,7 @@ type Orchestrator struct {
 	exchangeName   string
 	notifRepo      *repositories.NotificationRepository
 	eventRepo      *repositories.EventRepository
+	outboxRepo     *repositories.OutboxRepository
 	idempotency    *IdempotencyStore
 
 	// Publishes are serialised so each confirmation can be matched to the
@@ -38,6 +41,12 @@ type Orchestrator struct {
 	publishMu sync.Mutex
 	confirms  chan amqp.Confirmation
 	returns   chan amqp.Return
+
+	// Everything needed to rebuild the connection after a broker restart.
+	rabbitConn   *amqp.Connection
+	rabbitCfg    config.RabbitMQConfig
+	channelSick  bool
+	channelClose chan *amqp.Error
 }
 
 func NewOrchestrator(
@@ -45,8 +54,9 @@ func NewOrchestrator(
 	templateClient *TemplateClient,
 	userClient *UserClient,
 	redisClient *redis.Client,
+	rabbitConn *amqp.Connection,
 	rabbitChannel *amqp.Channel,
-	exchangeName string,
+	rabbitCfg config.RabbitMQConfig,
 	dbPool *pgxpool.Pool,
 ) *Orchestrator {
 	o := &Orchestrator{
@@ -55,26 +65,21 @@ func NewOrchestrator(
 		userClient:     userClient,
 		redisClient:    redisClient,
 		rabbitChannel:  rabbitChannel,
-		exchangeName:   exchangeName,
+		rabbitConn:     rabbitConn,
+		rabbitCfg:      rabbitCfg,
+		exchangeName:   rabbitCfg.ExchangeName,
 		notifRepo:      repositories.NewNotificationRepository(dbPool, logger),
 		eventRepo:      repositories.NewEventRepository(dbPool, logger),
+		outboxRepo:     repositories.NewOutboxRepository(dbPool, logger),
 		idempotency:    NewIdempotencyStore(redisClient, logger),
 		confirms:       rabbitChannel.NotifyPublish(make(chan amqp.Confirmation, 1)),
 		returns:        rabbitChannel.NotifyReturn(make(chan amqp.Return, 8)),
+		channelClose:   rabbitChannel.NotifyClose(make(chan *amqp.Error, 1)),
 	}
 
-	// An unroutable message is returned by the broker rather than silently
-	// dropped. It is still acked, so this is the only place it surfaces.
-	go func() {
-		for ret := range o.returns {
-			logger.Error().
-				Str("message_id", ret.MessageId).
-				Str("correlation_id", ret.CorrelationId).
-				Str("routing_key", ret.RoutingKey).
-				Str("reply_text", ret.ReplyText).
-				Msg("Message was unroutable and returned by the broker — no queue is bound for this routing key")
-		}
-	}()
+	o.watchChannel(o.channelClose)
+
+	o.watchReturns(o.returns)
 
 	return o
 }
@@ -91,6 +96,10 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	// so a request that fails part-way can be retried with the same key.
 	// A panic here would otherwise take the process down: this runs in its own
 	// goroutine, detached from the request.
+	channelLabel := string(req.NotificationType)
+	metrics.NotificationsReceived.WithLabelValues(channelLabel).Inc()
+	enrichmentStart := time.Now()
+
 	succeeded := false
 	notifIDForClaim := ""
 	defer func() {
@@ -101,6 +110,8 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 				Msg("Recovered from panic during enrichment")
 			o.storeNotificationStatus(ctx, correlationStr, dtos.StatusFailed, "internal error during enrichment")
 		}
+
+		metrics.EnrichmentDuration.WithLabelValues(channelLabel).Observe(time.Since(enrichmentStart).Seconds())
 
 		if succeeded {
 			o.idempotency.Complete(ctx, idempotencyKey, correlationStr, notifIDForClaim)
@@ -312,6 +323,8 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			"reason":  "user_opted_out",
 			"channel": string(req.NotificationType),
 		})
+		metrics.EnrichmentTotal.WithLabelValues(channelLabel, metrics.ResultCancelled, "consent").Inc()
+		metrics.StatusTransitions.WithLabelValues(dtos.StatusCancelled).Inc()
 		o.storeNotificationStatus(ctx, correlationStr, dtos.StatusCancelled, "user opted out of this channel")
 
 		// An opt-out is a settled outcome, not a failure. Keep the claim so a
@@ -376,42 +389,35 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 		CreatedAt:       time.Now(),
 	}
 
-	// Persist the exact message that goes on the queue, so a retry can republish
-	// it verbatim rather than re-deriving it from data that may since have changed.
-	if payload, err := toJSONMap(enrichedNotification); err != nil {
+	// Commit the enrichment result and the intent to publish together. The
+	// publisher drains the outbox separately, so a crash from here on loses
+	// nothing: the row is durable and will be picked up.
+	//
+	// The message is also stored verbatim, so a retry republishes exactly what
+	// was sent rather than re-deriving it from data that may have changed since.
+	payload, err := toJSONMap(enrichedNotification)
+	if err != nil {
 		o.logger.Error().Err(err).Msg("Failed to encode enriched payload")
-	} else if err := o.notifRepo.UpdateEnrichedPayload(ctx, notifID, payload, recipient); err != nil {
-		o.logger.Error().Err(err).Msg("Failed to update enriched payload")
+		o.failNotification(ctx, notifID, correlationID, correlationStr, "ENCODE_ERROR", "encode", channelLabel, err)
 		return
 	}
 
-	// Record enriched event
-	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventEnriched, nil)
-
-	// Publish to RabbitMQ
-	if err := o.publishToQueue(ctx, enrichedNotification); err != nil {
+	if err := o.commitToOutbox(ctx, notification, payload, recipient, enrichedNotification.Channel); err != nil {
 		o.logger.Error().
 			Err(err).
 			Str("correlation_id", correlationStr).
-			Msg("Failed to publish to queue")
+			Msg("Failed to enqueue notification for publication")
 
-		o.notifRepo.UpdateFailure(ctx, notifID, "QUEUE_ERROR", err.Error())
-		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
-			"error": err.Error(),
-			"stage": "queue_publish",
-		})
-		o.storeNotificationStatus(ctx, correlationStr, "failed", err.Error())
+		o.failNotification(ctx, notifID, correlationID, correlationStr, "OUTBOX_ERROR", "outbox_enqueue", channelLabel, err)
 		return
 	}
 
-	// Update status to queued
-	o.notifRepo.UpdateStatus(ctx, notifID, dtos.StatusQueued)
-
-	// Record queued event
+	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventEnriched, nil)
 	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventQueued, nil)
+	o.storeNotificationStatus(ctx, correlationStr, dtos.StatusQueued, "")
 
-	// Store success status in Redis
-	o.storeNotificationStatus(ctx, correlationStr, "queued", "")
+	metrics.EnrichmentTotal.WithLabelValues(channelLabel, metrics.ResultSuccess, "").Inc()
+	metrics.StatusTransitions.WithLabelValues(dtos.StatusQueued).Inc()
 
 	succeeded = true
 
@@ -479,6 +485,51 @@ func renderedBody(r dtos.RenderedContent) string {
 	return r.Body
 }
 
+// commitToOutbox writes the notification's queued state and its outbox entry in
+// one transaction.
+func (o *Orchestrator) commitToOutbox(
+	ctx context.Context,
+	notification *models.Notification,
+	payload models.JSONMap,
+	recipient string,
+	channel string,
+) error {
+	tx, err := o.outboxRepo.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := o.notifRepo.MarkQueuedTx(ctx, tx, notification.ID, notification.CreatedAt, payload, recipient); err != nil {
+		return err
+	}
+
+	routingKey := fmt.Sprintf("notification.%s", channel)
+	if err := o.outboxRepo.EnqueueTx(ctx, tx, notification.ID, notification.CorrelationID, routingKey, payload); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// failNotification records a terminal enrichment failure in one place.
+func (o *Orchestrator) failNotification(
+	ctx context.Context,
+	notifID, correlationID uuid.UUID,
+	correlationStr, code, stage, channel string,
+	cause error,
+) {
+	o.notifRepo.UpdateFailure(ctx, notifID, code, cause.Error())
+	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
+		"error": cause.Error(),
+		"stage": stage,
+	})
+	o.storeNotificationStatus(ctx, correlationStr, dtos.StatusFailed, cause.Error())
+
+	metrics.EnrichmentTotal.WithLabelValues(channel, metrics.ResultFailure, stage).Inc()
+	metrics.StatusTransitions.WithLabelValues(dtos.StatusFailed).Inc()
+}
+
 // toJSONMap round-trips a value through JSON so it can be stored in a JSONB column.
 func toJSONMap(v any) (models.JSONMap, error) {
 	raw, err := json.Marshal(v)
@@ -544,9 +595,15 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 		Str("notification_id", notification.NotificationID).
 		Msg("Publishing notification to queue")
 
+	publishStart := time.Now()
+
 	// Serialised so the confirmation read below belongs to this publish.
 	o.publishMu.Lock()
 	defer o.publishMu.Unlock()
+
+	if err := o.ensureChannel(); err != nil {
+		return err
+	}
 
 	err = o.rabbitChannel.Publish(
 		o.exchangeName, // exchange name (e.g., "notifications")
@@ -568,6 +625,7 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 	)
 
 	if err != nil {
+		o.channelSick = true
 		return fmt.Errorf("failed to publish to queue: %w", err)
 	}
 
@@ -585,6 +643,9 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 	case <-time.After(publishConfirmTimeout):
 		return fmt.Errorf("timed out waiting %s for publisher confirmation", publishConfirmTimeout)
 	}
+
+	metrics.PublishDuration.Observe(time.Since(publishStart).Seconds())
+	metrics.PublishTotal.WithLabelValues(notification.Channel, metrics.ResultSuccess).Inc()
 
 	o.logger.Info().
 		Str("routing_key", routingKey).

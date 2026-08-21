@@ -1,0 +1,24 @@
+# Without this, `COPY <service> ./<service>` drags the developer's local
+# node_modules into the image. That masked a broken Dockerfile for a long time:
+# images appeared to work locally and failed on a clean checkout.
+**/node_modules
+**/dist
+**/build
+**/.nx
+**/coverage
+
+# Secrets and local state must never reach an image layer.
+**/.env
+**/.env.*
+!**/.env.example
+**/*.sqlite3
+
+.git
+.github
+**/tmp
+**/.venv
+**/__pycache__
+**/*.pyc
+
+**/*.md
+!README.md

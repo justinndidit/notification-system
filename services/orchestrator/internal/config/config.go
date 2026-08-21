@@ -243,17 +243,17 @@ func (c *RedisConfig) GetRedisAddress() string {
 	return c.Address
 }
 
-func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
+func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Connection, *amqp.Channel, error) {
 	// Connect to RabbitMQ
 	conn, err := amqp.Dial(cfg.URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+		return nil, nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
 
 	// Create channel
 	ch, err := conn.Channel()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open channel: %w", err)
+		return nil, nil, fmt.Errorf("failed to open channel: %w", err)
 	}
 
 	// Declare exchange (topic exchange for routing)
@@ -267,7 +267,7 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 		nil,              // arguments
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to declare exchange: %w", err)
+		return nil, nil, fmt.Errorf("failed to declare exchange: %w", err)
 	}
 
 	// Define queues for each channel
@@ -300,18 +300,18 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 	// replayed instead of disappearing.
 	dlxName := cfg.ExchangeName + ".dlx"
 	if err = ch.ExchangeDeclare(dlxName, "topic", true, false, false, false, nil); err != nil {
-		return nil, fmt.Errorf("failed to declare dead-letter exchange: %w", err)
+		return nil, nil, fmt.Errorf("failed to declare dead-letter exchange: %w", err)
 	}
 
 	dlqName := cfg.ExchangeName + ".dlq"
 	if _, err = ch.QueueDeclare(dlqName, true, false, false, false, nil); err != nil {
-		return nil, fmt.Errorf("failed to declare dead-letter queue: %w", err)
+		return nil, nil, fmt.Errorf("failed to declare dead-letter queue: %w", err)
 	}
 
 	// "#" catches every routing key, so a new channel is dead-lettered without
 	// anyone remembering to add a binding.
 	if err = ch.QueueBind(dlqName, "#", dlxName, false, nil); err != nil {
-		return nil, fmt.Errorf("failed to bind dead-letter queue: %w", err)
+		return nil, nil, fmt.Errorf("failed to bind dead-letter queue: %w", err)
 	}
 
 	queueArgs := amqp.Table{
@@ -329,7 +329,7 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 			queueArgs, // dead-letter on reject
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to declare queue %s: %w", q.name, err)
+			return nil, nil, fmt.Errorf("failed to declare queue %s: %w", q.name, err)
 		}
 
 		// Bind queue to exchange with routing key
@@ -341,7 +341,7 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 			nil,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to bind queue %s: %w", q.name, err)
+			return nil, nil, fmt.Errorf("failed to bind queue %s: %w", q.name, err)
 		}
 	}
 
@@ -353,17 +353,17 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 			false,             // global
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to set QoS: %w", err)
+			return nil, nil, fmt.Errorf("failed to set QoS: %w", err)
 		}
 	}
 
 	// Publisher confirms: without them a broker-side failure is invisible and the
 	// orchestrator marks a notification "queued" that RabbitMQ never accepted.
 	if err = ch.Confirm(false); err != nil {
-		return nil, fmt.Errorf("failed to put channel into confirm mode: %w", err)
+		return nil, nil, fmt.Errorf("failed to put channel into confirm mode: %w", err)
 	}
 
-	return ch, nil
+	return conn, ch, nil
 }
 
 // ```
