@@ -237,10 +237,8 @@ services:
     container_name: push-service
     restart: unless-stopped
 
-    # --- FIX 1: Corrected '.env_file' to 'env_file' ---
-    env_file:
-      - ../services/push-service/.env
-
+    # No env_file: it pointed at a gitignored path, so the whole stack failed to
+    # start anywhere the file did not exist. Everything needed is set below.
     environment:
       # Service
       SERVICE_NAME: "push-service"
@@ -257,8 +255,12 @@ services:
       RABBITMQ_RECONNECT: "true"
 
       # FCM (Firebase Cloud Messaging)
-      FCM_SERVER_KEY: "${FCM_SERVER_KEY:-}" # Loads from .env
-      FCM_ENABLED: "true"
+      # Off by default: the service refuses to start when enabled without a
+      # service-account file, which silently crash-looped it. To send real push
+      # notifications, mount the credentials and set FCM_ENABLED=true.
+      FCM_ENABLED: "${FCM_ENABLED:-false}"
+      FCM_PROJECT_ID: "${FCM_PROJECT_ID:-}"
+      FCM_SERVICE_ACCOUNT_PATH: "${FCM_SERVICE_ACCOUNT_PATH:-}"
       FCM_MAX_RETRIES: "3"
       FCM_BATCH_SIZE: "500"
 
