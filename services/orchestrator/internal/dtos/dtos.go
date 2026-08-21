@@ -245,18 +245,24 @@ func (u UserData) Value() (driver.Value, error) {
 	return json.Marshal(u)
 }
 
-// Scan implements sql.Scanner for database select
+// Scan implements sql.Scanner for database select.
+//
+// pgx hands JSONB back as either []byte or string depending on the codec in
+// play, so both must be accepted — asserting only []byte fails at runtime on
+// every read.
 func (u *UserData) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
 
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("failed to unmarshal UserData: %v", value)
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, u)
+	case string:
+		return json.Unmarshal([]byte(v), u)
+	default:
+		return fmt.Errorf("failed to unmarshal UserData: unsupported type %T", value)
 	}
-
-	return json.Unmarshal(bytes, u)
 }
 
 // Value implements driver.Valuer for NotificationType
@@ -277,4 +283,64 @@ func (n *NotificationType) Scan(value interface{}) error {
 
 	*n = NotificationType(str)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Status and query API
+// ---------------------------------------------------------------------------
+
+// NotificationView is the public shape of a notification. It deliberately omits
+// enriched_payload, which holds the recipient's contact details and the fully
+// rendered message body.
+type NotificationView struct {
+	NotificationID string     `json:"notification_id"`
+	CorrelationID  string     `json:"correlation_id"`
+	IdempotencyKey *string    `json:"idempotency_key,omitempty"`
+	UserID         string     `json:"user_id"`
+	TemplateID     string     `json:"template_id"`
+	Channel        string     `json:"channel"`
+	Status         string     `json:"status"`
+	Priority       string     `json:"priority"`
+	Recipient      *string    `json:"recipient,omitempty"`
+	RetryCount     int        `json:"retry_count"`
+	MaxRetries     int        `json:"max_retries"`
+	ErrorCode      *string    `json:"error_code,omitempty"`
+	ErrorMessage   *string    `json:"error_message,omitempty"`
+	Provider       *string    `json:"provider,omitempty"`
+	EnrichedAt     *time.Time `json:"enriched_at,omitempty"`
+	QueuedAt       *time.Time `json:"queued_at,omitempty"`
+	SentAt         *time.Time `json:"sent_at,omitempty"`
+	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
+	FailedAt       *time.Time `json:"failed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// NotificationEventView is one entry in a notification's audit timeline.
+type NotificationEventView struct {
+	EventType     string         `json:"event_type"`
+	Channel       *string        `json:"channel,omitempty"`
+	EventData     map[string]any `json:"event_data,omitempty"`
+	Provider      *string        `json:"provider,omitempty"`
+	ProviderMsgID *string        `json:"provider_message_id,omitempty"`
+	EventAt       time.Time      `json:"event_at"`
+}
+
+// CursorPage carries cursor pagination for notification listings. The cursor is
+// a created_at timestamp rather than an offset, so paging stays correct while
+// new notifications arrive.
+type CursorPage struct {
+	NextCursor *time.Time `json:"next_cursor,omitempty"`
+	HasMore    bool       `json:"has_more"`
+	Limit      int        `json:"limit"`
+}
+
+// StatusCallbackRequest is what a channel worker POSTs back after attempting
+// delivery.
+type StatusCallbackRequest struct {
+	NotificationID string `json:"notification_id" validate:"required,uuid"`
+	Status         string `json:"status" validate:"required"`
+	Error          string `json:"error,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	ProviderMsgID  string `json:"provider_message_id,omitempty"`
 }

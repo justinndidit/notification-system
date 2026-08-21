@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,10 @@ import (
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 	"github.com/rs/zerolog"
 )
+
+// ErrNotFound is returned when a lookup matches no row. Callers should use
+// errors.Is rather than comparing error strings.
+var ErrNotFound = errors.New("notification not found")
 
 type NotificationRepository struct {
 	pool   *pgxpool.Pool
@@ -35,6 +40,7 @@ func (r *NotificationRepository) CreateNotification(ctx context.Context, notif *
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 		)
+		ON CONFLICT DO NOTHING
 	`
 
 	result, err := r.pool.Exec(ctx, query,
@@ -61,10 +67,15 @@ func (r *NotificationRepository) CreateNotification(ctx context.Context, notif *
 		return fmt.Errorf("failed to create notification: %w", err)
 	}
 
-	// Check if actually inserted (not a duplicate)
+	// Reachable now that the insert declares ON CONFLICT DO NOTHING; previously a
+	// conflict raised a unique-violation error and this branch was dead code.
 	if result.RowsAffected() == 0 {
+		key := ""
+		if notif.IdempotencyKey != nil {
+			key = *notif.IdempotencyKey
+		}
 		r.logger.Warn().
-			Str("idempotency_key", *notif.IdempotencyKey).
+			Str("idempotency_key", key).
 			Msg("Duplicate notification creation attempt")
 		return fmt.Errorf("duplicate notification with idempotency key")
 	}
@@ -134,15 +145,18 @@ func (r *NotificationRepository) UpdateStatus(ctx context.Context, id uuid.UUID,
 
 // UpdateEnrichedPayload stores the enriched notification data WITHOUT changing status
 // Status should be updated separately via UpdateStatus
-func (r *NotificationRepository) UpdateEnrichedPayload(ctx context.Context, id uuid.UUID, payload models.JSONMap) error {
+func (r *NotificationRepository) UpdateEnrichedPayload(ctx context.Context, id uuid.UUID, payload models.JSONMap, recipient string) error {
+	// The resolved recipient is stored alongside the payload so status queries
+	// can show where a notification was sent without decoding enriched_payload.
 	query := `
 		UPDATE notifications
 		SET enriched_payload = $1,
+		    recipient = NULLIF($2, ''),
 		    updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $3 AND deleted_at IS NULL
 	`
 
-	result, err := r.pool.Exec(ctx, query, payload, id)
+	result, err := r.pool.Exec(ctx, query, payload, recipient, id)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id.String()).Msg("Failed to update enriched payload")
 		return fmt.Errorf("failed to update enriched payload: %w", err)
@@ -165,6 +179,7 @@ func (r *NotificationRepository) CreateNotificationWithTransaction(ctx context.C
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 		)
+		ON CONFLICT DO NOTHING
 	`
 
 	_, err := tx.Exec(ctx, query,
@@ -242,8 +257,8 @@ func (r *NotificationRepository) GetByID(ctx context.Context, id uuid.UUID) (*mo
 		&notif.DeletedAt,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("notification not found")
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id.String()).Msg("Failed to get notification")
@@ -298,8 +313,8 @@ func (r *NotificationRepository) GetByCorrelationID(ctx context.Context, correla
 		&notif.DeletedAt,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("notification not found")
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		r.logger.Error().Err(err).Str("correlation_id", correlationID).Msg("Failed to get notification")

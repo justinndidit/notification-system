@@ -37,6 +37,11 @@ def fetch_email_template(template_code):
         return "Hello {name}, \n\n(Template not available) \n\n{link}"
     
 def report_status(notification_id, status, error=None):
+    if not notification_id:
+        # Requests submitted straight to the HTTP API have no orchestrator
+        # record to update; there is nothing to report against.
+        return
+
     payload = {
         'notification_id': notification_id,
         'status': status,

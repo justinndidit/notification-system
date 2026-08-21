@@ -51,6 +51,16 @@ func main() {
 	defer db.Close()
 	logger.Info().Msg("Database connected successfully")
 
+	// Ensure the partition window is open before accepting traffic, then keep it
+	// open. The notifications table is range-partitioned by created_at; without
+	// this, inserts start failing once the calendar passes the last partition.
+	partitionCtx, cancelPartitions := context.WithTimeout(context.Background(), 30*time.Second)
+	if err = database.EnsurePartitions(partitionCtx, db, &logger, database.PartitionMonthsAhead); err != nil {
+		cancelPartitions()
+		logger.Fatal().Err(err).Msg("failed to ensure notification partitions")
+	}
+	cancelPartitions()
+
 	// Redis connection
 	logger.Info().Msg("Connecting to Redis...")
 	redisClient := redis.NewClient(&redis.Options{
@@ -121,6 +131,9 @@ func main() {
 	// Context for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// Keep the partition window open for the life of the process.
+	database.StartPartitionMaintainer(ctx, db, &logger)
 
 	// Start server
 	go func() {

@@ -58,6 +58,9 @@ def to_task_payload(message: dict) -> dict:
     metadata["notification_id"] = message.get("notification_id")
 
     return {
+        # The orchestrator's status callback keys on this UUID; request_id is
+        # the caller's idempotency key and is not interchangeable with it.
+        "notification_id": message.get("notification_id"),
         "notification_type": message.get("channel", "email"),
         "user_id": message.get("user_id"),
         "template_code": message.get("template_code"),
@@ -127,7 +130,17 @@ class Command(BaseCommand):
             channel.exchange_declare(
                 exchange=EXCHANGE, exchange_type="topic", durable=True
             )
-            channel.queue_declare(queue=QUEUE, durable=True)
+            channel.exchange_declare(
+                exchange=f"{EXCHANGE}.dlx", exchange_type="topic", durable=True
+            )
+            # Arguments must match the orchestrator's declaration exactly —
+            # RabbitMQ rejects a redeclare with different arguments — so the
+            # dead-letter exchange is repeated here.
+            channel.queue_declare(
+                queue=QUEUE,
+                durable=True,
+                arguments={"x-dead-letter-exchange": f"{EXCHANGE}.dlx"},
+            )
             channel.queue_bind(
                 queue=QUEUE, exchange=EXCHANGE, routing_key=ROUTING_KEY
             )

@@ -11,6 +11,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// maxDeliveryAttempts bounds how many times a failing message is retried before
+// it is dead-lettered.
+const maxDeliveryAttempts = 5
+
 type Consumer struct {
 	conn           *amqp.Connection
 	channel        *amqp.Channel
@@ -62,14 +66,20 @@ func (c *Consumer) connect() error {
 		return fmt.Errorf("failed to set QoS: %w", err)
 	}
 
-	// Declare queue (idempotent)
+	// Declare queue (idempotent).
+	//
+	// The arguments must match the orchestrator's declaration exactly — RabbitMQ
+	// rejects a redeclare with different arguments — so the dead-letter exchange
+	// is repeated here.
 	_, err = c.channel.QueueDeclare(
 		c.config.Queue, // name
 		true,           // durable
 		false,          // delete when unused
 		false,          // exclusive
 		false,          // no-wait
-		nil,            // arguments
+		amqp.Table{
+			"x-dead-letter-exchange": c.config.Exchange + ".dlx",
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to declare queue: %w", err)
@@ -149,23 +159,61 @@ func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
 
 	// Process the message
 	if err := c.messageHandler(ctx, &message); err != nil {
-		c.logger.Error().Err(err).Str("notification_id", message.NotificationID).
-			// Str("duration", string(time.Since(startTime))).
-			Msg("Failed to process message")
+		attempts := deliveryAttempts(delivery)
 
-		// Requeue the message for retry
+		if attempts >= maxDeliveryAttempts {
+			// Give up and let the broker dead-letter it. Requeueing forever, as
+			// this used to, pins a consumer on a message that will never succeed.
+			c.logger.Error().Err(err).
+				Str("notification_id", message.NotificationID).
+				Int("attempts", attempts).
+				Msg("Exhausted delivery attempts, dead-lettering message")
+
+			delivery.Nack(false, false)
+			return
+		}
+
+		c.logger.Warn().Err(err).
+			Str("notification_id", message.NotificationID).
+			Int("attempt", attempts).
+			Int("max_attempts", maxDeliveryAttempts).
+			Msg("Failed to process message, requeueing")
+
 		delivery.Nack(false, true)
 		return
 	}
 
 	// Acknowledge successful processing
 	if err := delivery.Ack(false); err != nil {
-		c.logger.Error().Err(err).Discard().Msg("Failed to acknowledge message")
+		c.logger.Error().Err(err).Msg("Failed to acknowledge message")
 	}
 
 	c.logger.Info().Str("notification_id", message.NotificationID).
-		// Str("duration", string(time.Since(startTime))).
 		Msg("Message processed successfully")
+}
+
+// deliveryAttempts reports how many times the broker has delivered this message.
+//
+// RabbitMQ increments x-delivery-count only for quorum queues; on classic queues
+// Redelivered is the single bit of history available, so a redelivered message
+// is treated as its second attempt.
+func deliveryAttempts(delivery amqp.Delivery) int {
+	if raw, ok := delivery.Headers["x-delivery-count"]; ok {
+		switch v := raw.(type) {
+		case int32:
+			return int(v) + 1
+		case int64:
+			return int(v) + 1
+		case int:
+			return v + 1
+		}
+	}
+
+	if delivery.Redelivered {
+		return 2
+	}
+
+	return 1
 }
 
 func (c *Consumer) reconnect(ctx context.Context) error {
