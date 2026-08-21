@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [orchestrator, push-service]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+
+  typescript:
+    name: TypeScript (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            path: api-gateway
+          - service: user-service
+            path: services/user-service
+          - service: template-service
+            path: services/template-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Typecheck against the base config, not tsconfig.build.json. They diverged
+      # once before: nest build passed while tsc and jest could not resolve
+      # `src/*`, so the failure was invisible to the build.
+      - name: Typecheck
+        working-directory: ${{ matrix.path }}
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        working-directory: ${{ matrix.path }}
+        run: npx nest build
+
+      - name: Test
+        working-directory: ${{ matrix.path }}
+        run: npx jest --passWithNoTests
+
+  python:
+    name: Python (email-service)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/email-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: services/email-service/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Django system check
+        env:
+          DEBUG: 'True'
+          SECRET_KEY: ci-only-secret
+          ALLOWED_HOSTS: '*'
+        run: python manage.py check
+
+      - name: Tests
+        env:
+          DEBUG: 'True'
+          SECRET_KEY: ci-only-secret
+          ALLOWED_HOSTS: '*'
+        run: python manage.py test notifications
+
+  # Builds every image and runs one notification the whole way through. Most of
+  # the failures this project has hit were invisible to compilation — an
+  # unpinned tool version, a UTF-16 requirements file, a missing dependency, a
+  # queue argument mismatch. Only building and running catches those.
+  end-to-end:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write environment
+        run: |
+          cat > infra/.env <<'ENVFILE'
+          DB_USER=postgres
+          DB_PASSWORD=ci-postgres-password
+          REDIS_PASSWORD=
+          RABBITMQ_USER=guest
+          RABBITMQ_PASSWORD=guest
+          JWT_SECRET=ci-jwt-secret-value
+          INTERNAL_SERVICE_TOKEN=ci-internal-service-token
+          DJANGO_SECRET_KEY=ci-django-secret
+          POSTGRES_HOST_PORT=5432
+          ENVFILE
+
+      - name: Start the stack
+        run: docker compose -f infra/docker-compose.local.yaml up -d --build
+
+      - name: Wait for services
+        run: |
+          for probe in \
+            http://localhost:8000/health \
+            http://localhost:3002/health \
+            http://localhost:3007/user-service/health \
+            http://localhost:3003/template-service/health \
+            http://localhost:8025/api/v2/messages
+          do
+            for i in $(seq 1 60); do
+              curl -fsS --max-time 3 "$probe" >/dev/null 2>&1 && break
+              if [ "$i" = "60" ]; then
+                echo "timed out waiting for $probe"
+                docker compose -f infra/docker-compose.local.yaml ps
+                exit 1
+              fi
+              sleep 5
+            done
+          done
+
+      - name: Smoke test
+        env:
+          JWT_SECRET: ci-jwt-secret-value
+          INTERNAL_SERVICE_TOKEN: ci-internal-service-token
+        run: ./scripts/smoke-test.sh
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.local.yaml logs --tail 100
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker-compose.local.yaml down -v
