@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 )
 
@@ -100,6 +101,9 @@ func (o *Orchestrator) recoverStuckNotifications(ctx context.Context) error {
 
 		// Detached from the sweep's timeout: enrichment has its own budget and
 		// should not be cancelled when this pass finishes.
+		metrics.RecoveredTotal.Inc()
+		metrics.RetriesTotal.WithLabelValues("recovery").Inc()
+
 		go o.EnrichAndPublish(context.Background(), req, notification.CorrelationID, idempotencyKey)
 	}
 

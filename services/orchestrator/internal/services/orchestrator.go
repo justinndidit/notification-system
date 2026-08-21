@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/config"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/repositories"
 	"github.com/rs/zerolog"
@@ -95,6 +96,10 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	// so a request that fails part-way can be retried with the same key.
 	// A panic here would otherwise take the process down: this runs in its own
 	// goroutine, detached from the request.
+	channelLabel := string(req.NotificationType)
+	metrics.NotificationsReceived.WithLabelValues(channelLabel).Inc()
+	enrichmentStart := time.Now()
+
 	succeeded := false
 	notifIDForClaim := ""
 	defer func() {
@@ -105,6 +110,8 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 				Msg("Recovered from panic during enrichment")
 			o.storeNotificationStatus(ctx, correlationStr, dtos.StatusFailed, "internal error during enrichment")
 		}
+
+		metrics.EnrichmentDuration.WithLabelValues(channelLabel).Observe(time.Since(enrichmentStart).Seconds())
 
 		if succeeded {
 			o.idempotency.Complete(ctx, idempotencyKey, correlationStr, notifIDForClaim)
@@ -316,6 +323,8 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			"reason":  "user_opted_out",
 			"channel": string(req.NotificationType),
 		})
+		metrics.EnrichmentTotal.WithLabelValues(channelLabel, metrics.ResultCancelled, "consent").Inc()
+		metrics.StatusTransitions.WithLabelValues(dtos.StatusCancelled).Inc()
 		o.storeNotificationStatus(ctx, correlationStr, dtos.StatusCancelled, "user opted out of this channel")
 
 		// An opt-out is a settled outcome, not a failure. Keep the claim so a
@@ -389,7 +398,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	payload, err := toJSONMap(enrichedNotification)
 	if err != nil {
 		o.logger.Error().Err(err).Msg("Failed to encode enriched payload")
-		o.failNotification(ctx, notifID, correlationID, correlationStr, "ENCODE_ERROR", "encode", err)
+		o.failNotification(ctx, notifID, correlationID, correlationStr, "ENCODE_ERROR", "encode", channelLabel, err)
 		return
 	}
 
@@ -399,13 +408,16 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			Str("correlation_id", correlationStr).
 			Msg("Failed to enqueue notification for publication")
 
-		o.failNotification(ctx, notifID, correlationID, correlationStr, "OUTBOX_ERROR", "outbox_enqueue", err)
+		o.failNotification(ctx, notifID, correlationID, correlationStr, "OUTBOX_ERROR", "outbox_enqueue", channelLabel, err)
 		return
 	}
 
 	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventEnriched, nil)
 	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventQueued, nil)
 	o.storeNotificationStatus(ctx, correlationStr, dtos.StatusQueued, "")
+
+	metrics.EnrichmentTotal.WithLabelValues(channelLabel, metrics.ResultSuccess, "").Inc()
+	metrics.StatusTransitions.WithLabelValues(dtos.StatusQueued).Inc()
 
 	succeeded = true
 
@@ -504,7 +516,7 @@ func (o *Orchestrator) commitToOutbox(
 func (o *Orchestrator) failNotification(
 	ctx context.Context,
 	notifID, correlationID uuid.UUID,
-	correlationStr, code, stage string,
+	correlationStr, code, stage, channel string,
 	cause error,
 ) {
 	o.notifRepo.UpdateFailure(ctx, notifID, code, cause.Error())
@@ -513,6 +525,9 @@ func (o *Orchestrator) failNotification(
 		"stage": stage,
 	})
 	o.storeNotificationStatus(ctx, correlationStr, dtos.StatusFailed, cause.Error())
+
+	metrics.EnrichmentTotal.WithLabelValues(channel, metrics.ResultFailure, stage).Inc()
+	metrics.StatusTransitions.WithLabelValues(dtos.StatusFailed).Inc()
 }
 
 // toJSONMap round-trips a value through JSON so it can be stored in a JSONB column.
@@ -580,6 +595,8 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 		Str("notification_id", notification.NotificationID).
 		Msg("Publishing notification to queue")
 
+	publishStart := time.Now()
+
 	// Serialised so the confirmation read below belongs to this publish.
 	o.publishMu.Lock()
 	defer o.publishMu.Unlock()
@@ -626,6 +643,9 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 	case <-time.After(publishConfirmTimeout):
 		return fmt.Errorf("timed out waiting %s for publisher confirmation", publishConfirmTimeout)
 	}
+
+	metrics.PublishDuration.Observe(time.Since(publishStart).Seconds())
+	metrics.PublishTotal.WithLabelValues(notification.Channel, metrics.ResultSuccess).Inc()
 
 	o.logger.Info().
 		Str("routing_key", routingKey).

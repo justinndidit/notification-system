@@ -3,6 +3,7 @@ package routers
 import (
 	chi "github.com/go-chi/chi/v5"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/app"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func SetupRoutes(app *app.App) *chi.Mux {
@@ -28,6 +29,11 @@ func SetupRoutes(app *app.App) *chi.Mux {
 	})
 
 	r.Get("/health", app.HHandler.HandleHealthCheck)
+
+	// Scraped by Prometheus. Unauthenticated, like the health check: it exposes
+	// operational counters, not notification content. It should not be routed
+	// through the public gateway.
+	r.Handle("/metrics", promhttp.Handler())
 
 	return r
 }

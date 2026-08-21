@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/repositories"
 )
 
@@ -40,6 +41,8 @@ func (o *Orchestrator) StartOutboxPublisher(ctx context.Context) {
 			Msg("Outbox publisher started")
 
 		for {
+			o.reportOutboxDepth(ctx)
+
 			published, err := o.drainOutboxOnce(ctx)
 			if err != nil {
 				o.logger.Error().Err(err).Msg("Outbox drain failed")
@@ -105,6 +108,7 @@ func (o *Orchestrator) drainOutboxOnce(ctx context.Context) (int, error) {
 		}
 
 		if err := o.publishToQueue(claimCtx, notification); err != nil {
+			metrics.PublishTotal.WithLabelValues(notification.Channel, metrics.ResultFailure).Inc()
 			backoff := outboxBackoff(entry.Attempts)
 
 			o.logger.Warn().Err(err).
@@ -136,6 +140,23 @@ func (o *Orchestrator) drainOutboxOnce(ctx context.Context) (int, error) {
 	}
 
 	return len(entries), nil
+}
+
+// reportOutboxDepth publishes the pending and failed counts as gauges. Depth is
+// the signal that moves first when delivery stalls.
+func (o *Orchestrator) reportOutboxDepth(ctx context.Context) {
+	countCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pending, failed, err := o.outboxRepo.CountPending(countCtx)
+	if err != nil {
+		// Metrics must never take down the publisher.
+		o.logger.Debug().Err(err).Msg("Could not read outbox depth")
+		return
+	}
+
+	metrics.OutboxDepth.WithLabelValues(repositories.OutboxPending).Set(float64(pending))
+	metrics.OutboxDepth.WithLabelValues(repositories.OutboxFailed).Set(float64(failed))
 }
 
 // outboxBackoff grows exponentially from outboxBaseBackoff up to outboxMaxBackoff.
