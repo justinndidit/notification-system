@@ -361,6 +361,7 @@ services:
       DJANGO_SETTINGS_MODULE: email_service.settings
       DEBUG: "True"
       SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-insecure-key}
+      ALLOWED_HOSTS: "*"
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/email_service_db
       DB_SSL_REQUIRE: "False"
 

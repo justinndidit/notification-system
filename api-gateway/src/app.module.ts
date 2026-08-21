@@ -2,19 +2,21 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { CustomRedisStorageService } from './throttler/redis-storage.service';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { LoggingInterceptor } from './middleware/logging.interceptor';
 import { ThrottlerStorageModule } from './throttler/throttler-storage.module';
-import { ProxyModule } from './middleware/proxy.module';
+import { ProxyModule } from './proxy/proxy.module';
 // import { NotificationModule } from './notification/notification.module';
 import { AuthModule } from './auth/auth.module';
 import { ResponseInterceptor } from './common/interceptors/response.interceptors';
 import { RedisModule } from './common/redis.module';
 import { Reflector } from '@nestjs/core';
-import { JwtHelper } from './common/jwt-helper';
+import config from './config/config';
+
+const appConfig = config();
 
 @Module({
   imports: [
@@ -29,8 +31,8 @@ import { JwtHelper } from './common/jwt-helper';
       useFactory: (storage: CustomRedisStorageService) => ({
         throttlers: [
           {
-            ttl: 60,
-            limit: 100,
+            ttl: appConfig.throttleTtl * 1000,
+            limit: appConfig.throttleLimit,
           },
         ],
         storage,
@@ -41,7 +43,9 @@ import { JwtHelper } from './common/jwt-helper';
   providers: [
     AppService,
     Reflector,
-    JwtHelper,
+    // Order matters: rate limiting runs before authentication so unauthenticated
+    // floods are shed at the edge rather than after JWT verification.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     CustomRedisStorageService,

@@ -24,13 +24,44 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-qpb5myu&s@6t0pr+o0)hgx5i1e)z4)3ylr40tguj1l)s+f0o=d'
+def _env_bool(name, default=False):
+    return os.getenv(name, str(default)).strip().lower() in ('1', 'true', 'yes', 'on')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+DEBUG = _env_bool('DEBUG', False)
+
+# Never fall back to a checked-in key outside development: a shared SECRET_KEY
+# lets anyone forge session cookies and signed tokens.
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-development-only-key'
+    else:
+        raise RuntimeError(
+            'SECRET_KEY must be set when DEBUG is off. Refusing to start with a '
+            'default key.'
+        )
+
+# Comma-separated, e.g. "api.example.com,notifications.example.com".
+# "*" is only tolerated in development.
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv('ALLOWED_HOSTS', '*' if DEBUG else '').split(',')
+    if host.strip()
+]
+if not ALLOWED_HOSTS:
+    raise RuntimeError('ALLOWED_HOSTS must be set when DEBUG is off.')
+
+# Behind the API Gateway, so the proxy's scheme header decides whether the
+# original request was HTTPS.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Application definition
