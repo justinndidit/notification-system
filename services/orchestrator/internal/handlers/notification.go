@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	validator "github.com/go-playground/validator/v10"
 	redis "github.com/go-redis/redis/v8"
@@ -79,33 +78,33 @@ func (h *NotificationHandler) HandleNotificationRequest(w http.ResponseWriter, r
 		correlationUUID = parsed
 	}
 
-	// 3. Check idempotency
-	val, err := h.redisClient.Get(r.Context(), idempotencyKey).Result()
-	if err != nil && err != redis.Nil {
-		h.logger.Error().Err(err).Msg("Error retrieving idempotency key from redis")
-		rb := utils.WriteResponseFailed(nil, err.Error(), "Error retrieving idempotency key from cache", nil)
+	// 3. Claim the idempotency key atomically. SETNX both detects duplicates and
+	// reserves the key in one round trip; the previous GET-then-SET let two
+	// concurrent requests observe an empty key and both proceed.
+	claimed, existing, err := h.orchestrator.Idempotency().Claim(r.Context(), idempotencyKey, correlationID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("key", idempotencyKey).Msg("Error claiming idempotency key")
+		rb := utils.WriteResponseFailed(nil, err.Error(), "Internal Server Error", nil)
 		utils.WriteJson(w, http.StatusInternalServerError, rb)
 		return
 	}
 
-	if val != "" {
+	if !claimed {
 		h.logger.Info().Str("key", idempotencyKey).Msg("Duplicate request detected")
 
 		data := map[string]any{
 			"idempotency_key": idempotencyKey,
-			"correlation_id":  val, // The stored correlationID
 		}
+		if existing != nil {
+			data["correlation_id"] = existing.CorrelationID
+			data["status"] = existing.State
+			if existing.NotificationID != "" {
+				data["notification_id"] = existing.NotificationID
+			}
+		}
+
 		rb := utils.WriteResponseSuccess(data, "", "Duplicate request detected", nil)
 		utils.WriteJson(w, http.StatusOK, rb)
-		return
-	}
-
-	// 4. Cache idempotency key
-	err = h.redisClient.Set(r.Context(), idempotencyKey, correlationID, 24*time.Hour).Err()
-	if err != nil {
-		h.logger.Error().Err(err).Str("key", idempotencyKey).Msg("Error caching idempotency key")
-		rb := utils.WriteResponseFailed(nil, err.Error(), "Internal Server Error", nil)
-		utils.WriteJson(w, http.StatusInternalServerError, rb)
 		return
 	}
 

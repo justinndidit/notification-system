@@ -295,15 +295,38 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 		},
 	}
 
+	// Dead-letter topology. Every channel queue routes rejections here rather
+	// than dropping them, so an undeliverable message can be inspected and
+	// replayed instead of disappearing.
+	dlxName := cfg.ExchangeName + ".dlx"
+	if err = ch.ExchangeDeclare(dlxName, "topic", true, false, false, false, nil); err != nil {
+		return nil, fmt.Errorf("failed to declare dead-letter exchange: %w", err)
+	}
+
+	dlqName := cfg.ExchangeName + ".dlq"
+	if _, err = ch.QueueDeclare(dlqName, true, false, false, false, nil); err != nil {
+		return nil, fmt.Errorf("failed to declare dead-letter queue: %w", err)
+	}
+
+	// "#" catches every routing key, so a new channel is dead-lettered without
+	// anyone remembering to add a binding.
+	if err = ch.QueueBind(dlqName, "#", dlxName, false, nil); err != nil {
+		return nil, fmt.Errorf("failed to bind dead-letter queue: %w", err)
+	}
+
+	queueArgs := amqp.Table{
+		"x-dead-letter-exchange": dlxName,
+	}
+
 	// Declare and bind each queue
 	for _, q := range queues {
 		queue, err := ch.QueueDeclare(
-			q.name, // queue name
-			true,   // durable
-			false,  // delete when unused
-			false,  // exclusive
-			false,  // no-wait
-			nil,    // arguments
+			q.name,    // queue name
+			true,      // durable
+			false,     // delete when unused
+			false,     // exclusive
+			false,     // no-wait
+			queueArgs, // dead-letter on reject
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to declare queue %s: %w", q.name, err)
@@ -332,6 +355,12 @@ func SetupRabbitMQ(cfg RabbitMQConfig) (*amqp.Channel, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to set QoS: %w", err)
 		}
+	}
+
+	// Publisher confirms: without them a broker-side failure is invisible and the
+	// orchestrator marks a notification "queued" that RabbitMQ never accepted.
+	if err = ch.Confirm(false); err != nil {
+		return nil, fmt.Errorf("failed to put channel into confirm mode: %w", err)
 	}
 
 	return ch, nil

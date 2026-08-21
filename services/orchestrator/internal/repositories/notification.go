@@ -40,6 +40,7 @@ func (r *NotificationRepository) CreateNotification(ctx context.Context, notif *
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 		)
+		ON CONFLICT DO NOTHING
 	`
 
 	result, err := r.pool.Exec(ctx, query,
@@ -66,10 +67,15 @@ func (r *NotificationRepository) CreateNotification(ctx context.Context, notif *
 		return fmt.Errorf("failed to create notification: %w", err)
 	}
 
-	// Check if actually inserted (not a duplicate)
+	// Reachable now that the insert declares ON CONFLICT DO NOTHING; previously a
+	// conflict raised a unique-violation error and this branch was dead code.
 	if result.RowsAffected() == 0 {
+		key := ""
+		if notif.IdempotencyKey != nil {
+			key = *notif.IdempotencyKey
+		}
 		r.logger.Warn().
-			Str("idempotency_key", *notif.IdempotencyKey).
+			Str("idempotency_key", key).
 			Msg("Duplicate notification creation attempt")
 		return fmt.Errorf("duplicate notification with idempotency key")
 	}
@@ -173,6 +179,7 @@ func (r *NotificationRepository) CreateNotificationWithTransaction(ctx context.C
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 		)
+		ON CONFLICT DO NOTHING
 	`
 
 	_, err := tx.Exec(ctx, query,
