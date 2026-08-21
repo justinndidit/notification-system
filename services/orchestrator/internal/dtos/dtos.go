@@ -16,6 +16,26 @@ type HTTPResponse struct {
 	Message string          `json:"message" validate:"required"`
 	Meta    *PaginationMeta `json:"meta"`
 }
+
+// UserDeliveryProfile is what GET /user/{id}/delivery-profile returns: where to
+// reach a user and whether they have consented, in one call.
+type UserDeliveryProfile struct {
+	UserID       string        `json:"user_id"`
+	Name         string        `json:"name"`
+	Email        string        `json:"email"`
+	DeviceTokens []DeviceToken `json:"device_tokens"`
+	EmailOptIn   bool          `json:"email_opt_in"`
+	PushOptIn    bool          `json:"push_opt_in"`
+	DailyLimit   int           `json:"daily_limit"`
+	Language     string        `json:"language"`
+}
+
+// DeviceToken is one FCM registration token and the platform it belongs to.
+type DeviceToken struct {
+	Token    string `json:"token"`
+	Platform string `json:"platform"` // android | ios
+}
+
 type UserPreferenceData struct {
 	TemplateID  string `json:"id" validate:"required"`
 	UserID      string `json:"user_id" validate:"required"`
@@ -60,8 +80,8 @@ type PaginationMeta struct {
 
 type NotificationRequest struct {
 	NotificationType NotificationType `json:"notification_type" validate:"required"`
-	UserID           string           `json:"user_id" validate:"required"`
-	TemplateCode     string           `json:"template_code" validate:"required"` //template id
+	UserID           string           `json:"user_id" validate:"required,uuid"`
+	TemplateCode     string           `json:"template_code" validate:"required,uuid"` //template id
 	Variables        UserData         `json:"variables" validate:"required"`
 	RequestID        string           `json:"request_id" validate:"required"`
 	Priority         int              `json:"priority" validate:"required"`
@@ -184,13 +204,19 @@ const (
 )
 
 type EnrichedNotification struct {
-	NotificationID  string             `json:"notification_id"`
-	CorrelationID   string             `json:"correlation_id"`
-	IdempotencyKey  string             `json:"idempotency_key"`
-	UserID          string             `json:"user_id"`
-	TemplateCode    string             `json:"template_code"`
-	Channel         string             `json:"channel"`
-	Priority        string             `json:"priority"`
+	NotificationID string `json:"notification_id"`
+	CorrelationID  string `json:"correlation_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+	UserID         string `json:"user_id"`
+	TemplateCode   string `json:"template_code"`
+	Channel        string `json:"channel"`
+	Priority       string `json:"priority"`
+	// Recipient is the resolved destination for this channel (email address for
+	// email). Workers must not have to look this up themselves.
+	Recipient string `json:"recipient"`
+	// Tokens is populated for push notifications so the worker never has to
+	// look up device registrations itself.
+	Tokens          []DeviceToken      `json:"tokens"`
 	UserPreferences UserPreferenceData `json:"user_preferences"`
 	Template        TemplateData       `json:"template"`
 	Variables       UserData           `json:"variables"`

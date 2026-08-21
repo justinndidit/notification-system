@@ -28,7 +28,7 @@ export class UserService {
 
   //SIGN UP
   async signup(registerDto: RegisterDto) {
-    const { name, email, password, push_token } = registerDto;
+    const { name, email, password } = registerDto;
     //checking if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -45,7 +45,6 @@ export class UserService {
           name,
           email,
           password: hashedPassword,
-          push_token,
           // Never taken from the request body — see UpdateRoleDto / updateRole().
           role: 'user',
         },
@@ -260,39 +259,32 @@ export class UserService {
     return user.preferences;
   }
 
-  //UPDATE PUSH TOKEN
-  async updatePushToken(
+  //UPDATE DEVICE TOKENS
+  // Replaces the full set for this user. FCM registration tokens rotate, so the
+  // client owns the list and sends the current one on each registration.
+  async updateDeviceTokens(
     userId: string,
-    pushToken: WebPushSubscription,
-  ): Promise<{ push_token: WebPushSubscription | null; user_id: string }> {
-    if (
-      !pushToken ||
-      !pushToken.endpoint ||
-      !pushToken.keys?.p256dh ||
-      !pushToken.keys?.auth
-    ) {
-      throw new BadRequestException('Invalid push token structure');
+    deviceTokens: DeviceToken[],
+  ): Promise<{ user_id: string; device_tokens: DeviceToken[] }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    // Check uniqueness - Prisma doesn't support direct JSON equality in where clauses
-    // So we serialize and use a raw query to check for duplicates
-    const serializedToken = JSON.stringify(pushToken);
-    const existing = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM "User" 
-      WHERE push_token::text = ${serializedToken}::text
-    `;
+    // De-duplicate on token value; one device should appear only once.
+    const seen = new Set<string>();
+    const deduped = deviceTokens.filter((dt) => {
+      if (!dt.token || seen.has(dt.token)) return false;
+      seen.add(dt.token);
+      return true;
+    });
 
-    if (existing.length > 0 && existing[0].id !== userId) {
-      throw new ConflictException('Push token already in use');
-    }
-
-    // Update - cast WebPushSubscription to Prisma's InputJsonValue type
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
-        push_token: pushToken as unknown as Prisma.InputJsonValue,
+        device_tokens: deduped as unknown as Prisma.InputJsonValue,
       },
-      select: { id: true, push_token: true },
+      select: { id: true, device_tokens: true },
     });
 
     // Invalidate cache since user data changed
@@ -300,8 +292,44 @@ export class UserService {
 
     return {
       user_id: updated.id,
-      push_token: updated.push_token as WebPushSubscription | null,
+      device_tokens: (updated.device_tokens as DeviceToken[] | null) ?? [],
     };
+  }
+
+  //DELIVERY PROFILE — everything the orchestrator needs to deliver to a user
+  // in one call: where to reach them, and whether they've consented.
+  async getDeliveryProfile(userId: string) {
+    const cacheKey = `user:delivery-profile:${userId}`;
+
+    const cached = await this.cacheService.get<DeliveryProfile>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { preferences: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const profile: DeliveryProfile = {
+      user_id: user.id,
+      name: user.name,
+      email: user.email,
+      device_tokens: (user.device_tokens as DeviceToken[] | null) ?? [],
+      email_opt_in: user.preferences?.email_opt_in ?? true,
+      push_opt_in: user.preferences?.push_opt_in ?? true,
+      daily_limit: user.preferences?.daily_limit ?? 100,
+      language: user.preferences?.language ?? 'en',
+    };
+
+    // Short TTL: consent changes should take effect quickly.
+    await this.cacheService.set(cacheKey, profile, 300);
+
+    return profile;
   }
 
   //UPDATE ROLE (admin only — authorization is enforced in the controller)

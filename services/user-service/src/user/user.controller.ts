@@ -17,6 +17,7 @@ import {
   RegisterDto,
   UpdatePreferenceDto,
   UpdateRoleDto,
+  UpdateDeviceTokensDto,
 } from './dto/user.dto';
 import { UserService } from './user.service';
 import { JwtAuthGaurd } from './jwt-auth.guard';
@@ -98,6 +99,15 @@ export class UserController {
     return this.userService.updatePreference(userId, updateDto);
   }
 
+  //GET DELIVERY PROFILE
+  // Single call used by the orchestrator during enrichment: contact details
+  // plus consent flags, so it doesn't have to stitch several endpoints together.
+  @Get(':id/delivery-profile')
+  @UseGuards(ServiceOrJwtGuard)
+  getDeliveryProfile(@Param('id') userId: string) {
+    return this.userService.getDeliveryProfile(userId);
+  }
+
   // UPDATE ROLE (admin only)
   // Role is deliberately not settable at signup — it is assigned here by an
   // existing admin, so a self-service registration cannot escalate itself.
@@ -116,18 +126,18 @@ export class UserController {
     return this.userService.updateRole(userId, updateRoleDto.role);
   }
 
-  //   update push token
-  @Patch(':id/push-token')
+  //   update device tokens
+  @Patch(':id/device-tokens')
   @UseGuards(JwtAuthGaurd)
-  async updatePushToken(
+  async updateDeviceTokens(
     @Param('id') id: string,
-    @Body('push_token') pushToken: WebPushSubscription,
+    @Body() dto: UpdateDeviceTokensDto,
     @Req() { user }: JwtRequest,
   ) {
     if (user.user_id !== id)
       throw new UnauthorizedException(
-        'Forbidden, you are not allowed to update this push toke ',
+        'Forbidden: you are not allowed to update this user\'s device tokens',
       );
-    return this.userService.updatePushToken(id, pushToken);
+    return this.userService.updateDeviceTokens(id, dto.device_tokens);
   }
 }

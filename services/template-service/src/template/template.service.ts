@@ -384,7 +384,7 @@ export class TemplateService {
         name: user.name,
         email: user.email,
         role: user.role,
-        push_token: user.push_token,
+        device_tokens: user.device_tokens,
         preferences: user.preferences
           ? {
               email_opt_in: user.preferences.email_opt_in,
@@ -410,7 +410,7 @@ export class TemplateService {
       id: user.id,
       name: user.name,
       email: user.email,
-      push_token: user.push_token ?? undefined,
+      device_tokens: user.device_tokens ?? undefined,
     };
   }
 
