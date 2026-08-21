@@ -78,11 +78,12 @@ func main() {
 
 	// RabbitMQ connection
 	logger.Info().Msg("Connecting to RabbitMQ...")
-	rabbitChannel, err := config.SetupRabbitMQ(cfg.RabbitMQ)
+	rabbitConn, rabbitChannel, err := config.SetupRabbitMQ(cfg.RabbitMQ)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to initialize RabbitMQ")
 	}
 	defer rabbitChannel.Close()
+	defer rabbitConn.Close()
 	logger.Info().Msg("RabbitMQ connected successfully")
 
 	// Initialize service clients
@@ -105,8 +106,9 @@ func main() {
 		templateClient,
 		userClient,
 		redisClient,
+		rabbitConn,
 		rabbitChannel,
-		cfg.RabbitMQ.ExchangeName,
+		cfg.RabbitMQ,
 		db.Pool,
 	)
 
@@ -134,6 +136,15 @@ func main() {
 
 	// Keep the partition window open for the life of the process.
 	database.StartPartitionMaintainer(ctx, db, &logger)
+
+	// Drain the outbox into RabbitMQ. Enrichment commits the intent to publish;
+	// this is what actually publishes it, so a broker outage delays delivery
+	// rather than losing it.
+	orchestrator.StartOutboxPublisher(ctx)
+
+	// Pick up notifications abandoned mid-enrichment by a process that died
+	// before its outbox entry was committed.
+	orchestrator.StartRecoverySweeper(ctx)
 
 	// Start server
 	go func() {
