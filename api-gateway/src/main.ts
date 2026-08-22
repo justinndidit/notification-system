@@ -1,3 +1,6 @@
+// Must be first: the OpenTelemetry SDK patches HTTP and framework libraries
+// before anything requires them.
+import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';

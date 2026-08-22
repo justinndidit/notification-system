@@ -45,11 +45,10 @@ lookup by event unambiguous.
 content — one message per channel the template declares, with `subject`/`html`
 for email and `title`/`body` for push.
 
-It does **not** look up users. It previously resolved recipients from this
-service's own `User` table, a schema copy nothing ever wrote to, so it returned
-404 for every possible input while also duplicating consent logic the
-orchestrator owns. Deciding *who* receives a notification belongs to the
-orchestrator; this service owns *what it says*.
+It does **not** look up users. Deciding *who* receives a notification — and
+whether they have consented — belongs to the orchestrator, which owns the user
+data. This service owns *what the message says*. Keeping rendering pure also
+makes it trivially testable: content in, content out.
 
 ---
 
@@ -78,5 +77,5 @@ pnpm test
 ```
 
 10 tests covering rendering: that the latest version wins, that each declared
-channel gets its own message with the right fields, that an empty context
-renders rather than throwing — and that no user lookup happens.
+channel gets its own message with the right fields, that an empty context renders
+rather than throwing, and that no user lookup happens.

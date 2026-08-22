@@ -11,10 +11,6 @@ Part of the [Notification System](../../README.md).
 | **Owns** | Redis delivery-status records. No relational database |
 | **Consumes** | `push_notifications`, bound to `notification.push` |
 
-> **Status: built, unproven.** The consumer runs and the FCM v1 client is
-> written, but nothing has ever been sent to a real device. Treat this as code
-> that compiles rather than a feature that works. iOS/APNS is an explicit stub.
-
 ---
 
 ## What it does
@@ -38,8 +34,8 @@ body — so this service never looks anything up or compiles a template. See
 ## Failure handling
 
 A message that fails is retried up to five delivery attempts and then
-dead-lettered to `notifications.dlx`. It previously nacked with `requeue=true`
-unconditionally, so a poison message pinned a consumer forever.
+dead-lettered to `notifications.dlx`, so a message that can never succeed is set
+aside for inspection rather than occupying a consumer indefinitely.
 
 Attempt counting reads `x-delivery-count` where the broker provides it (quorum
 queues) and falls back to the `redelivered` flag on classic queues.
@@ -74,6 +70,7 @@ and `FCM_SERVICE_ACCOUNT_PATH`, and set `FCM_ENABLED=true`.
 go test -race ./...
 ```
 
-Covers delivery-attempt counting across both queue types — the bound on the
-retry loop depends on it never reading as zero — and per-token success/failure
-aggregation.
+Covers delivery-attempt counting across both queue types, which is what bounds
+the retry loop, and per-token success and failure aggregation.
+
+APNS is not implemented; iOS tokens produce a placeholder result.

@@ -36,10 +36,9 @@ request instead of stitching several endpoints together.
 
 ## Roles
 
-`role` is **not** settable at signup. It once was, and since signup is public
-that meant anyone could register as an admin by adding one field to the request
-body. Roles are assigned through `PATCH /user/:id/role`, which requires an
-existing admin.
+`role` is **not** settable at signup. Signup is public, so accepting a role from
+the request body would let any caller register as an admin. Roles are assigned
+through `PATCH /user/:id/role`, which requires an existing admin.
 
 That leaves a bootstrap problem, solved explicitly rather than by a back door:
 
@@ -55,10 +54,11 @@ every user's delivery profile.
 
 ## Device tokens
 
-`device_tokens` holds FCM registration tokens as `[{ token, platform }]`. It
-previously stored a single W3C Web Push subscription, which the push service —
-an FCM client — could never have used. The two address different delivery
-mechanisms and are not convertible.
+`device_tokens` holds FCM registration tokens as `[{ token, platform }]`, matching
+what the push service sends through the FCM HTTP v1 API.
+
+The whole set is replaced on write: FCM registration tokens rotate, so the client
+owns the list. Duplicates are removed.
 
 ---
 
@@ -86,7 +86,7 @@ pnpm install && pnpm prisma migrate deploy && pnpm start:dev
 pnpm test
 ```
 
-15 tests. The load-bearing ones: signup never takes `role` from the request
-body, passwords are hashed rather than stored, and signin returns an identical
-error for an unknown email and a wrong password so it cannot be used to
-enumerate accounts.
+15 tests. The load-bearing ones: signup never takes `role` from the request body,
+passwords are hashed rather than stored, and signin returns an identical error
+for an unknown email and a wrong password so it cannot be used to enumerate
+accounts.

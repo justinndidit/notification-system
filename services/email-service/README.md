@@ -43,9 +43,9 @@ Retries use exponential backoff to a 600-second cap, up to five attempts, after
 which the payload is published to a durable `failed.queue` for inspection rather
 than dropped.
 
-Every outcome is reported back to the orchestrator — including the deduplicated
-path. Returning silently there left the notification sitting at `queued` forever,
-waiting for a result that was never coming.
+Every outcome is reported back to the orchestrator, including the deduplicated
+path. A worker that returns silently leaves the notification at `queued`
+indefinitely, waiting for a result that never arrives.
 
 ---
 
@@ -91,6 +91,6 @@ python manage.py test notifications
 ```
 
 Nine tests on the bridge's payload translation. That translation is the only
-thing keeping a Go producer and a Python consumer in step — every integration
-bug this service has had lived exactly there, including reporting the caller's
-idempotency key where the callback expected a notification UUID.
+thing keeping a Go producer and a Python consumer in step, and neither side can
+catch a mismatch at compile time — which makes it the highest-value place in this
+service to test.

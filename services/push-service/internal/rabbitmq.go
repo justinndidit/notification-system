@@ -9,6 +9,8 @@ import (
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // maxDeliveryAttempts bounds how many times a failing message is retried before
@@ -141,15 +143,27 @@ func (c *Consumer) Start(ctx context.Context) error {
 }
 
 func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
-	// startTime := time.Now()
+	// Continue the trace that produced this message. Without extracting the
+	// context from the headers the worker's spans would form a separate trace,
+	// hiding the very hop most worth being able to see across.
+	ctx = ExtractAMQP(ctx, delivery.Headers)
+
+	ctx, span := Tracer().Start(ctx, "push.consume")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("messaging.system", "rabbitmq"),
+		attribute.String("messaging.destination.name", c.config.Queue),
+		attribute.String("messaging.message.id", delivery.MessageId),
+	)
 
 	c.logger.Info().
 		Str("message_id", delivery.MessageId).
-		// Str("delivery_tag", string(delivery.DeliveryTag)).
 		Msg("Received push notification message")
 
 	var message PushNotificationMessage
 	if err := json.Unmarshal(delivery.Body, &message); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "malformed message")
 		c.logger.Error().Err(err).Str("body", string(delivery.Body)).Msg("Failed to unmarshal message")
 
 		// Reject and don't requeue malformed messages
@@ -159,6 +173,7 @@ func (c *Consumer) handleMessage(ctx context.Context, delivery amqp.Delivery) {
 
 	// Process the message
 	if err := c.messageHandler(ctx, &message); err != nil {
+		span.RecordError(err)
 		attempts := deliveryAttempts(delivery)
 
 		if attempts >= maxDeliveryAttempts {

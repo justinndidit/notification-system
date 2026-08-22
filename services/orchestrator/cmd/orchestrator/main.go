@@ -18,6 +18,7 @@ import (
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/routers"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/server"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/services"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/tracing"
 )
 
 const DefaultContextTimeout = 30
@@ -32,6 +33,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("failed to load config")
 	}
 	logger.Info().Msg("Config loaded successfully")
+
+	// Tracing is optional: without a collector configured the service runs
+	// untraced rather than refusing to start, so observability tooling can
+	// never take down notification delivery.
+	shutdownTracing, err := tracing.Init(context.Background(), &logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialise tracing")
+	}
 
 	// Database migration
 	migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 30*time.Second)
@@ -191,6 +200,13 @@ func main() {
 	if err = srv.Shutdown(shutdownCtx); err != nil {
 		logger.Fatal().Err(err).Msg("server forced to shutdown")
 	}
+
+	// Flush pending spans before exit, or the last trace of a shutdown is lost.
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+	if err = shutdownTracing(flushCtx); err != nil {
+		logger.Error().Err(err).Msg("error flushing traces")
+	}
+	cancelFlush()
 
 	logger.Info().Msg("Server exited properly")
 }

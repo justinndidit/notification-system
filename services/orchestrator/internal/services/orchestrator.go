@@ -16,8 +16,11 @@ import (
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/metrics"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/models"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/repositories"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/tracing"
 	"github.com/rs/zerolog"
 	"github.com/streadway/amqp"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // publishConfirmTimeout bounds how long a publish waits for the broker to
@@ -100,6 +103,13 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	metrics.NotificationsReceived.WithLabelValues(channelLabel).Inc()
 	enrichmentStart := time.Now()
 
+	// Continues the caller's trace: the handler passes the ingress span context
+	// on a background context, so this is a child span rather than a new root.
+	ctx, span := tracing.Tracer().Start(ctx, "notification.enrich")
+	defer span.End()
+	tracing.CorrelationID(span, correlationStr)
+	tracing.Channel(span, channelLabel)
+
 	succeeded := false
 	notifIDForClaim := ""
 	defer func() {
@@ -127,6 +137,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	// Generate notification ID
 	notifID := uuid.New()
 	notifIDForClaim = notifID.String()
+	tracing.NotificationID(span, notifID.String())
 
 	// The request DTO validates these as UUIDs, so a parse failure here means
 	// the handler was bypassed. Fail loudly rather than persisting a placeholder.
@@ -503,6 +514,10 @@ func (o *Orchestrator) failNotification(
 	correlationStr, code, stage, channel string,
 	cause error,
 ) {
+	span := trace.SpanFromContext(ctx)
+	span.RecordError(cause)
+	span.SetStatus(codes.Error, stage)
+
 	o.notifRepo.UpdateFailure(ctx, notifID, createdAt, code, cause.Error())
 	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 		"error": cause.Error(),
@@ -561,7 +576,7 @@ func (o *Orchestrator) resolveRecipient(channel dtos.NotificationType, profile d
 }
 
 // publishToQueue publishes enriched notification to RabbitMQ with channel-specific routing
-func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.EnrichedNotification) error {
+func (o *Orchestrator) publishToQueue(ctx context.Context, notification dtos.EnrichedNotification) error {
 	body, err := json.Marshal(notification)
 	if err != nil {
 		return fmt.Errorf("failed to marshal notification: %w", err)
@@ -589,6 +604,12 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 		return err
 	}
 
+	ctx, span := tracing.Tracer().Start(ctx, "notification.publish")
+	defer span.End()
+	tracing.CorrelationID(span, notification.CorrelationID)
+	tracing.NotificationID(span, notification.NotificationID)
+	tracing.Channel(span, notification.Channel)
+
 	err = o.rabbitChannel.Publish(
 		o.exchangeName, // exchange name (e.g., "notifications")
 		routingKey,     // routing key (e.g., "notification.email")
@@ -601,10 +622,13 @@ func (o *Orchestrator) publishToQueue(_ context.Context, notification dtos.Enric
 			MessageId:     notification.NotificationID,
 			CorrelationId: notification.CorrelationID,
 			Timestamp:     time.Now(),
-			Headers: amqp.Table{
+			// Trace context travels with the message: a queue hop shares no
+			// connection between producer and consumer, so without this the
+			// trace would end here and a new one would begin at the worker.
+			Headers: tracing.InjectAMQP(ctx, amqp.Table{
 				"channel":  notification.Channel,
 				"priority": notification.Priority,
-			},
+			}),
 		},
 	)
 
