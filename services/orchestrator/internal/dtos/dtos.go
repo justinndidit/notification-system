@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type HTTPResponse struct {
@@ -98,20 +96,7 @@ type NotificationRequest struct {
 	MetaData         map[string]any   `json:"metadata,omitempty"`
 }
 
-type NotificationRequestDTO struct {
-	NotificationType NotificationType //channels
-	UserID           string
-	TemplateCode     string //template id
-	Variables        UserData
-	RequestID        string
-	Priority         int
-	MetaData         map[string]any
-	ScheduledFor     *time.Time
-	CorrelationID    string
-}
-
 type NotificationType string
-type CorrelationOID string
 
 const (
 	Email NotificationType = "email"
@@ -147,36 +132,6 @@ func NotificationPriorityToString(p NotificationPriority) string {
 		return "normal" // default fallback
 	}
 }
-
-type TemplateServiceRequest struct {
-	TemplateID string `json:"template_id"`
-}
-
-type TemplateServiceResponse struct {
-}
-
-// Represents the data from the Template Response
-type Template struct {
-}
-
-// Extended version
-type BatchNotificationRequest struct {
-	NotificationType string                    `json:"notification_type"`
-	TemplateCode     uuid.UUID                 `json:"template_code"`
-	UserIDs          []uuid.UUID               `json:"user_ids"`        // list of recipients
-	CommonVariables  map[string]any            `json:"variables"`       // shared variables
-	Personalization  map[string]map[string]any `json:"personalization"` // optional per-user overrides
-	RequestID        string                    `json:"request_id"`      // idempotency for batch
-	Priority         string                    `json:"priority"`
-	MetaData         map[string]any            `json:"metadata"`
-	ScheduledFor     *time.Time                `json:"scheduled_for,omitempty"`
-	ChunkSize        int                       `json:"chunk_size,omitempty"` // optional, default 1000
-}
-
-// type NotificationWithEvents struct {
-// 	Notification
-// 	Events []NotificationEvent `db:"-"` // Not from DB directly
-// }
 
 type NotificationStats struct {
 	Date              time.Time `db:"date"`

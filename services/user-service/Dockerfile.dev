@@ -38,6 +38,11 @@ COPY services/user-service ./services/user-service
 COPY --from=deps /usr/src/app/services/user-service/node_modules ./services/user-service/node_modules
 COPY --from=deps /usr/src/app/services/user-service/prisma ./services/user-service/prisma
 
+# Generate the Prisma client inside the image, after the source is in place.
+# The deps stage emits it under src/, which the source copy above replaces —
+# and generating here also guarantees the client matches the schema shipped.
+RUN cd services/user-service && npx prisma generate --schema=./prisma/schema.prisma
+
 # Set working directory to the service
 WORKDIR /usr/src/app/services/user-service
 

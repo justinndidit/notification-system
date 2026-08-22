@@ -1,6 +1,6 @@
 // src/templates/types/template.types.ts
 
-import { NotificationChannel, TemplateEvent } from '@prisma/client';
+import { NotificationChannel, TemplateEvent } from '@notification/template-prisma';
 
 declare interface TemplateVariables {
   [key: string]: string;

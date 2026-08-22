@@ -1,6 +1,6 @@
 // src/templates/dto/create-template.dto.ts
 import { PartialType } from '@nestjs/mapped-types';
-import { NotificationChannel } from '@prisma/client';
+import { NotificationChannel } from '@notification/template-prisma';
 import {
   IsEnum,
   IsString,

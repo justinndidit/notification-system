@@ -2,7 +2,7 @@
 
 Reference for how the Notification System is put together — component responsibilities, the messaging topology, data model, and the reasoning behind each decision.
 
-Where a pattern is designed but not yet fully implemented, this document says so explicitly and links to [`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md).
+Where a pattern is designed but not yet fully implemented, this document says so explicitly and links to [`ENGINEERING_LOG.md`](./ENGINEERING_LOG.md).
 
 ---
 
@@ -258,7 +258,7 @@ The intent is that a worker receives everything it needs and never calls back in
 
 > **Current limitation — this is the system's central gap.** The contract is not yet honoured on either side. It carries no resolved recipient (email address, device tokens) and no rendered content, so the push worker — which expects `tokens[]`, `title`, and `body` — receives nothing usable and silently drops the message, and the email worker expects a differently-shaped payload entirely.
 >
-> The intended fix is to **resolve recipients and render templates during enrichment**, so the message is genuinely self-contained: add `recipient`, `tokens[]`, and rendered `subject`/`title`/`body`, and define the schema in one shared place instead of three separate structs. See [`PROJECT_CONTEXT.md` §3](../PROJECT_CONTEXT.md) and Phase 1.
+> The intended fix is to **resolve recipients and render templates during enrichment**, so the message is genuinely self-contained: add `recipient`, `tokens[]`, and rendered `subject`/`title`/`body`, and define the schema in one shared place instead of three separate structs. See [`ENGINEERING_LOG.md` §3](./ENGINEERING_LOG.md) and Phase 1.
 
 ---
 
@@ -383,4 +383,4 @@ Production considerations, not yet implemented:
 
 This document describes the intended design. Several parts are designed but not yet realized, and the gaps are concentrated in one place: **the contract between the orchestrator and its workers** (§6).
 
-For a complete, line-referenced audit of what is implemented versus described — including security issues, correctness bugs, and a phased plan to close them — see **[`PROJECT_CONTEXT.md`](../PROJECT_CONTEXT.md)**.
+For a complete, line-referenced audit of what is implemented versus described — including security issues, correctness bugs, and a phased plan to close them — see **[`ENGINEERING_LOG.md`](./ENGINEERING_LOG.md)**.

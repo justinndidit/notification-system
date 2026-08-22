@@ -1,530 +1,96 @@
-# Email Microservice
+# Email Service
 
-A scalable, resilient email notification microservice built with Django, Celery, and RabbitMQ. Part of a distributed notification system.
+Delivers email over SMTP, with retries, circuit breaking and dead-lettering.
 
-## 📋 Features
+Part of the [Notification System](../../README.md).
 
-- **Asynchronous Processing**: Uses Celery for background email processing
-- **Message Queue Integration**: RabbitMQ for reliable message delivery
-- **Circuit Breaker Pattern**: Prevents cascading failures with automatic recovery
-- **Idempotency**: Prevents duplicate emails using request IDs
-- **Comprehensive Logging**: Structured JSON logging with correlation IDs
-- **Retry Logic**: Exponential backoff with configurable max retries
-- **Dead-Letter Queue**: Failed messages are persisted for manual inspection
-- **Template Support**: Dynamic template rendering with variable substitution
-- **REST API**: Standard request/response format with proper HTTP status codes
-- **Health Checks**: Built-in health endpoint for monitoring
-- **Docker Support**: Containerized for easy deployment
-- **CI/CD Pipeline**: GitHub Actions workflow for automated testing and deployment
+| | |
+|---|---|
+| **Stack** | Django 5.2, Celery, pybreaker, pika |
+| **Port** | 8000 (published on 8003) |
+| **Owns** | `email_service_db` — `EmailLog`, one row per `request_id` |
+| **Consumes** | `email_queue`, bound to `notification.email` |
 
-## 🏗️ Architecture
+---
 
-```
-┌─────────────────────┐
-│  API Gateway        │
-│ (sends requests)    │
-└──────────┬──────────┘
-           │
-    POST /api/v1/notifications/
-           │
-           ▼
-┌─────────────────────┐
-│  Email Service API  │
-│  (validates)        │
-└──────────┬──────────┘
-           │
-           ▼
-    ┌─────────────┐
-    │  RabbitMQ   │
-    │ (queue)     │
-    └──────┬──────┘
-           │
-           ▼
-┌─────────────────────┐
-│  Celery Worker      │
-│  (processes)        │
-└──────────┬──────────┘
-           │
-    ┌──────┴──────┬──────────┐
-    │             │          │
-    ▼             ▼          ▼
-┌────────┐  ┌────────┐  ┌──────────┐
-│ SMTP   │  │Template│  │ Status   │
-│        │  │Service │  │ Callback │
-└────────┘  └────────┘  └──────────┘
-```
+## Three processes, one image
 
-## 🚀 Quick Start
+| Process | Command | Role |
+|---|---|---|
+| API | `runserver` | Direct HTTP submission, status queries |
+| Bridge | `manage.py consume_notifications` | Reads the queue, dispatches to Celery |
+| Worker | `celery -A email_service worker` | Performs the SMTP send |
 
-### Prerequisites
+**The bridge is not optional.** The orchestrator publishes plain JSON, while
+Celery expects its own wire protocol — a raw message on the queue can never
+dispatch as a task. The bridge reads
+[the contract](../../docs/contracts/enriched-notification.md), translates it into
+the task's payload, and hands it over. Without it the queue simply fills up.
 
-- Python 3.11+
-- Docker & Docker Compose
-- PostgreSQL (for production)
-- RabbitMQ (message broker)
+---
 
-### Local Development
+## Delivery guarantees
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd EmailMicroService
-   ```
+`send_email_task` runs with `acks_late=True` and checks `EmailLog` for an
+already-delivered `request_id` before doing any work, so a redelivered message
+does not send twice.
 
-2. **Create environment file**
-   ```bash
-   cp .env.example .env
-   ```
+Both the SMTP send and the template fetch sit behind separate circuit breakers
+(5 failures / 60s reset for SMTP; 3 / 30s for templates), so a sustained outage
+fails fast instead of queueing thousands of doomed calls.
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+Retries use exponential backoff to a 600-second cap, up to five attempts, after
+which the payload is published to a durable `failed.queue` for inspection rather
+than dropped.
 
-4. **Run database migrations**
-   ```bash
-   python manage.py migrate
-   ```
+Every outcome is reported back to the orchestrator — including the deduplicated
+path. Returning silently there left the notification sitting at `queued` forever,
+waiting for a result that was never coming.
 
-5. **Start services with Docker Compose**
-   ```bash
-   docker-compose up
-   ```
+---
 
-6. **In another terminal, run Celery worker**
-   ```bash
-   celery -A email_service worker --loglevel=info
-   ```
+## API
 
-7. **Test the API**
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/notifications/ \
-     -H "Content-Type: application/json" \
-     -d '{
-       "notification_type": "email",
-       "user_id": "550e8400-e29b-41d4-a716-446655440000",
-       "template_code": "welcome_email",
-       "variables": {
-         "name": "John Doe",
-         "email": "john@example.com",
-         "link": "https://example.com/verify",
-         "subject": "Welcome to Our Platform"
-       },
-       "request_id": "req-12345-67890",
-       "priority": 10,
-       "metadata": {}
-     }'
-   ```
+| Method | Route | |
+|---|---|---|
+| `POST` | `/api/v1/notifications/` | Direct submission, bypassing the queue |
+| `GET` | `/api/v1/notifications/{request_id}/` | Status |
+| `GET` | `/api/v1/notifications/list/` | Recent deliveries |
+| `GET` | `/health/` | Liveness |
 
-## 📖 API Documentation
+The direct path has no orchestrator record behind it, so it renders from a
+fetched template rather than using pre-rendered content, and reports no status.
 
-### Send Notification
+---
 
-**Endpoint**: `POST /api/v1/notifications/`
-
-**Request Body**:
-```json
-{
-  "notification_type": "email",
-  "user_id": "uuid-string",
-  "template_code": "welcome_email",
-  "variables": {
-    "name": "John",
-    "email": "john@example.com",
-    "subject": "Welcome!",
-    "link": "https://example.com/verify"
-  },
-  "request_id": "unique-request-id",
-  "priority": 10,
-  "metadata": {
-    "campaign_id": "campaign-123"
-  }
-}
-```
-
-**Response** (202 - Accepted):
-```json
-{
-  "success": true,
-  "message": "Notification queued for processing",
-  "data": {
-    "request_id": "unique-request-id",
-    "task_id": "celery-task-id",
-    "status": "queued"
-  },
-  "error": null,
-  "meta": null
-}
-```
-
-### Get Notification Status
-
-**Endpoint**: `GET /api/v1/notifications/{request_id}/`
-
-**Response** (200 - OK):
-```json
-{
-  "success": true,
-  "message": "Notification status retrieved",
-  "data": {
-    "request_id": "unique-request-id",
-    "user_id": "user-uuid",
-    "to_email": "john@example.com",
-    "template_code": "welcome_email",
-    "status": "delivered",
-    "attempts": 1,
-    "error": null,
-    "created_at": "2025-11-13T10:30:00",
-    "updated_at": "2025-11-13T10:30:05"
-  },
-  "error": null,
-  "meta": null
-}
-```
-
-### List Notifications
-
-**Endpoint**: `GET /api/v1/notifications/list/?user_id=uuid&status=delivered&limit=20&page=1`
-
-**Query Parameters**:
-- `user_id` (optional): Filter by user ID
-- `status` (optional): Filter by status (pending, processing, delivered, failed)
-- `limit` (optional): Results per page (default: 20, max: 100)
-- `page` (optional): Page number (default: 1)
-
-**Response** (200 - OK):
-```json
-{
-  "success": true,
-  "message": "Retrieved 20 notifications",
-  "data": [
-    {
-      "request_id": "req-1",
-      "user_id": "user-uuid",
-      "to_email": "john@example.com",
-      "template_code": "welcome_email",
-      "status": "delivered",
-      "attempts": 1,
-      "created_at": "2025-11-13T10:30:00",
-      "updated_at": "2025-11-13T10:30:05"
-    }
-  ],
-  "error": null,
-  "meta": {
-    "total": 100,
-    "limit": 20,
-    "page": 1,
-    "total_pages": 5,
-    "has_next": true,
-    "has_previous": false
-  }
-}
-```
-
-### Health Check
-
-**Endpoint**: `GET /health/`
-
-**Response** (200 - OK):
-```json
-{
-  "success": true,
-  "message": "Service is healthy",
-  "data": {
-    "status": "healthy",
-    "service": "email-service",
-    "version": "1.0.0",
-    "timestamp": "2025-11-13T10:30:00"
-  },
-  "error": null,
-  "meta": null
-}
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env` file with the following variables:
+## Running it
 
 ```bash
-# Django
-DJANGO_SETTINGS_MODULE=email_service.settings
-DEBUG=False
-SECRET_KEY=your-secret-key
-
-# Database (SQLite for dev, PostgreSQL for prod)
-DATABASE_URL=postgresql://user:password@localhost:5432/email_service
-
-# Email Configuration
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
-EMAIL_FROM=noreply@example.com
-
-# RabbitMQ Configuration
-RABBITMQ_HOST=rabbitmq
-RABBITMQ_USER=guest
-RABBITMQ_PASSWORD=guest
-
-# Template Service
-TEMPLATE_SERVICE_URL=http://template-service:8000/templates/
-
-# Status Callback
-STATUS_CALLBACK_URL=http://api-gateway:8000/api/v1/notifications/status/
-
-# Logging
-LOG_LEVEL=INFO
-
-# Redis (optional, for caching)
-REDIS_URL=redis://localhost:6379/0
+docker compose -f ../../infra/docker-compose.local.yaml up \
+  email-service email-worker email-bridge
 ```
 
-## 📊 Key Features Explained
+Locally this points at **MailHog** (`http://localhost:8025`), so no real mail is
+ever sent.
 
-### Circuit Breaker Pattern
+| Variable | Purpose |
+|---|---|
+| `SECRET_KEY` | Required when `DEBUG` is off — the service refuses to start otherwise |
+| `DEBUG`, `ALLOWED_HOSTS` | Both must be set explicitly in production |
+| `DATABASE_URL`, `DB_SSL_REQUIRE` | Postgres; SSL off for a local container, on for managed providers |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_FROM` | SMTP |
+| `RABBITMQ_*`, `CELERY_BROKER_URL` | Broker |
+| `JWT_SECRET` | Signs the short-lived service token used for status callbacks |
 
-Protects against cascading failures when external services (SMTP, Template Service) are unavailable:
+---
 
-```python
-smtp_circuit_breaker = CircuitBreaker(
-    fail_max=5,              # Open after 5 failures
-    reset_timeout=60,        # Try again after 60 seconds
-    exclude=[ValueError],    # Don't count validation errors
-)
-```
-
-**States**:
-- **Closed**: Normal operation, requests pass through
-- **Open**: Service unavailable, requests fail fast
-- **Half-Open**: Testing if service recovered
-
-### Idempotency
-
-Prevents duplicate emails by tracking `request_id`:
-
-```python
-existing = EmailLog.objects.filter(request_id=request_id).first()
-if existing and existing.status == "delivered":
-    return {"status": "already_delivered"}
-```
-
-### Retry Logic
-
-Exponential backoff with jitter for transient failures:
-
-```python
-# Retry with exponential backoff: 2^attempt seconds
-retry_delay = min(2 ** attempts, 600)  # Max 10 minutes
-raise self.retry(exc=exc, countdown=retry_delay)
-```
-
-### Dead-Letter Queue
-
-Permanently failed messages are stored for manual inspection:
-
-```python
-if attempts >= MAX_RETRIES:
-    publish_to_failed_queue(payload)  # Store in failed.queue
-    report_status(request_id, "failed")
-```
-
-## 🧪 Testing
-
-### Run Tests
+## Tests
 
 ```bash
-pytest notifications/tests.py -v
+python manage.py test notifications
 ```
 
-### Run with Coverage
-
-```bash
-pytest notifications/tests.py --cov=notifications --cov-report=html
-```
-
-### Integration Test
-
-```bash
-# Start Docker Compose
-docker-compose up
-
-# Send test notification
-curl -X POST http://localhost:8000/api/v1/notifications/ \
-  -H "Content-Type: application/json" \
-  -d '{...}'
-
-# Check status
-curl http://localhost:8000/api/v1/notifications/req-12345-67890/
-```
-
-## 📦 Docker Deployment
-
-### Build Image
-
-```bash
-docker build -t email-service:latest .
-```
-
-### Run with Docker Compose
-
-```bash
-docker-compose up -d
-```
-
-### View Logs
-
-```bash
-docker-compose logs -f email_service
-```
-
-## 🚀 Production Deployment
-
-### Prerequisites
-
-1. PostgreSQL database
-2. RabbitMQ broker
-3. SMTP credentials (Gmail, SendGrid, etc.)
-4. Server for deployment
-
-### Environment Setup
-
-```bash
-# Set production variables
-export DEBUG=False
-export SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
-export DATABASE_URL=postgresql://user:password@db-host:5432/email_service
-export EMAIL_HOST_PASSWORD=your-app-password
-```
-
-### Database Migration
-
-```bash
-python manage.py migrate
-```
-
-### Run Celery Worker
-
-```bash
-celery -A email_service worker \
-  --loglevel=info \
-  --concurrency=4 \
-  --max-tasks-per-child=1000
-```
-
-### Monitor with Flower
-
-```bash
-celery -A email_service flower
-# Access at http://localhost:5555
-```
-
-## 📊 Performance Targets
-
-- **Throughput**: 1,000+ notifications per minute
-- **API Response Time**: <100ms (p99)
-- **Delivery Success Rate**: 99.5%
-- **Retry Handling**: Exponential backoff with max 5 retries
-
-## 🔍 Monitoring
-
-### Health Check
-
-```bash
-curl http://localhost:8000/health/
-```
-
-### Flower Dashboard
-
-```bash
-celery -A email_service flower
-# Open http://localhost:5555
-```
-
-### RabbitMQ Management
-
-```bash
-# Access at http://localhost:15672
-# Default credentials: guest/guest
-```
-
-## 🛠️ Troubleshooting
-
-### Workers not processing tasks
-
-```bash
-# Check Celery worker is running
-ps aux | grep celery
-
-# Check RabbitMQ connection
-docker logs email_service
-
-# Inspect tasks
-celery -A email_service inspect active
-```
-
-### SMTP Connection Issues
-
-```bash
-# Test SMTP credentials
-python manage.py shell
->>> from django.core.mail import send_mail
->>> send_mail('Test', 'Test body', 'from@example.com', ['to@example.com'])
-```
-
-### Database Connection Issues
-
-```bash
-# Check database connectivity
-python manage.py dbshell
-
-# Run migrations
-python manage.py migrate --verbosity 2
-```
-
-## 📝 Logging
-
-All events are logged with correlation IDs for tracing:
-
-```json
-{
-  "timestamp": "2025-11-13T10:30:00.123456",
-  "level": "INFO",
-  "logger": "email_service.celery",
-  "message": "Email sent successfully",
-  "correlation_id": "req-12345-67890",
-  "module": "tasks",
-  "function": "send_email_task",
-  "line": 142
-}
-```
-
-## 📚 Additional Resources
-
-- [Django Documentation](https://docs.djangoproject.com/)
-- [Celery Documentation](https://docs.celeryproject.org/)
-- [RabbitMQ Documentation](https://www.rabbitmq.com/documentation.html)
-- [Circuit Breaker Pattern](https://martinfowler.com/bliki/CircuitBreaker.html)
-
-## 📄 License
-
-This project is part of a distributed notification system. See LICENSE file for details.
-
-## 👥 Team
-
-- Email Service: Responsible for email delivery
-- API Gateway: Entry point and request routing
-- User Service: User data and preferences
-- Template Service: Template management
-- Push Service: Push notification delivery
-
-## 🎯 Roadmap
-
-- [ ] Add support for email attachments
-- [ ] Implement bounce handling
-- [ ] Add A/B testing for subject lines
-- [ ] Webhook system for custom integrations
-- [ ] Advanced analytics dashboard
-- [ ] Rate limiting per user
+Nine tests on the bridge's payload translation. That translation is the only
+thing keeping a Go producer and a Python consumer in step — every integration
+bug this service has had lived exactly there, including reporting the caller's
+idempotency key where the callback expected a notification UUID.

@@ -50,16 +50,6 @@ type ServerConfig struct {
 	CORSAllowedOrigins []string      `koanf:"cors_allowed_origins" validate:"required"`
 }
 
-// type ConsulConfig struct {
-// 	Address       string `koanf:"address" validate:"required"`
-// 	ServiceName   string `koanf:"service_name" validate:"required"`
-// 	ServicePort   int    `koanf:"service_port" validate:"required"`
-// 	ServiceHost   string `koanf:"service_host" validate:"required"`
-// 	HealthCheck   string `koanf:"health_check" validate:"required"`
-// 	CheckInterval string `koanf:"check_interval"`
-// 	Enabled       bool   `koanf:"enabled"`
-// }
-
 type ExternalServices struct {
 	UserServiceAddress     string `koanf:"user_service_address" validate:"required"`
 	TemplateServiceAddress string `koanf:"template_service_address" validate:"required"`
@@ -75,7 +65,6 @@ type Config struct {
 	RabbitMQ RabbitMQConfig   `koanf:"rabbitmq"`
 	Server   ServerConfig     `koanf:"server"`
 	External ExternalServices `koanf:"external"`
-	// Consul           ConsulConfig     `koanf:"consul"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -108,128 +97,6 @@ func LoadConfig() (*Config, error) {
 	logger.Info().Msg("config validation passed")
 	return mainConfig, nil
 }
-
-// func parseMapString(value string) (map[string]string, bool) {
-// 	if !strings.HasPrefix(value, "map[") || !strings.HasSuffix(value, "]") {
-// 		return nil, false
-// 	}
-
-// 	content := strings.TrimPrefix(value, "map[")
-// 	content = strings.TrimSuffix(content, "]")
-
-// 	result := make(map[string]string)
-
-// 	if content == "" {
-// 		return result, true
-// 	}
-
-// 	i := 0
-// 	for i < len(content) {
-// 		keyStart := i
-// 		for i < len(content) && content[i] != ':' {
-// 			i++
-// 		}
-// 		if i >= len(content) {
-// 			break
-// 		}
-
-// 		key := strings.TrimSpace(content[keyStart:i])
-// 		i++
-
-// 		valueStart := i
-// 		if i+4 <= len(content) && content[i:i+4] == "map[" {
-// 			bracketCount := 0
-// 			for i < len(content) {
-// 				if i+4 <= len(content) && content[i:i+4] == "map[" {
-// 					bracketCount++
-// 					i += 4
-// 				} else if content[i] == ']' {
-// 					bracketCount--
-// 					i++
-// 					if bracketCount == 0 {
-// 						break
-// 					}
-// 				} else {
-// 					i++
-// 				}
-// 			}
-// 		} else {
-// 			for i < len(content) && content[i] != ' ' {
-// 				i++
-// 			}
-// 		}
-
-// 		value := strings.TrimSpace(content[valueStart:i])
-
-// 		if nestedMap, isNested := parseMapString(value); isNested {
-// 			for nestedKey, nestedValue := range nestedMap {
-// 				result[key+"."+nestedKey] = nestedValue
-// 			}
-// 		} else {
-// 			result[key] = value
-// 		}
-
-// 		for i < len(content) && content[i] == ' ' {
-// 			i++
-// 		}
-// 	}
-
-// 	return result, true
-// }
-
-// func LoadConfig() (*Config, error) {
-// 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
-
-// 	k := koanf.New(".")
-
-// 	envVars := make(map[string]string)
-// 	for _, env := range os.Environ() {
-// 		parts := strings.SplitN(env, "=", 2)
-// 		if len(parts) == 2 && strings.HasPrefix(parts[0], "ORCHESTRATOR_") {
-// 			key := parts[0]
-// 			value := parts[1]
-
-// 			configKey := strings.ToLower(strings.TrimPrefix(key, "ORCHESTRATOR_"))
-
-// 			if mapData, isMap := parseMapString(value); isMap {
-// 				for mapKey, mapValue := range mapData {
-// 					flatKey := configKey + "." + strings.ToLower(mapKey)
-// 					envVars[flatKey] = mapValue
-// 				}
-// 			} else {
-// 				envVars[configKey] = value
-// 			}
-// 		}
-// 	}
-
-// 	err := k.Load(env.ProviderWithValue("ORCHESTRATOR_", ".", func(key, value string) (string, any) {
-// 		return strings.ToLower(strings.TrimPrefix(key, "ORCHESTRATOR_")), value
-// 	}), nil)
-// 	if err != nil {
-// 		logger.Fatal().Err(err).Msg("could not load initial env variables")
-// 	}
-
-// 	for key, value := range envVars {
-// 		k.Set(key, value)
-// 	}
-
-// 	mainConfig := &Config{}
-
-// 	err = k.Unmarshal("", mainConfig)
-// 	if err != nil {
-// 		logger.Fatal().Err(err).Msg("could not unmarshal main config")
-// 	}
-
-// 	validate := validator.New()
-
-// 	err = validate.Struct(mainConfig)
-// 	if err != nil {
-// 		logger.Fatal().Err(err).Msg("config validation failed")
-// 	}
-// 	logger.Info().Msg("config validation passed")
-
-// 	return mainConfig, nil
-// }
 
 // GetDatabaseDSN returns the PostgreSQL connection string
 func (c *DatabaseConfig) GetDatabaseDSN() string {

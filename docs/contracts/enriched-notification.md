@@ -128,7 +128,7 @@ The producer and both consumers are in different languages, so nothing catches a
 
 So: change this document first, then the producer, then every consumer. Adding an optional field is safe. Renaming or removing one is not, and needs the consumers updated in the same change.
 
-Known gaps, tracked in `PROJECT_CONTEXT.md`:
+Known gaps, tracked in `../ENGINEERING_LOG.md`:
 
 - The email worker takes a differently-shaped `payload` (`request_id`, `variables.email`). The queue bridge is responsible for translating this message into that shape until the task is updated to consume the contract directly.
 - `template` and `variables` are carried for auditing and debugging. Workers should not depend on them for delivery — `recipient`, `subject`/`title`, and `body` are the delivery surface.

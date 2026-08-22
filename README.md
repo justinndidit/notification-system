@@ -38,7 +38,7 @@ Email delivery works end to end and is covered by CI. Push delivery is built but
 
 **What works today:** a notification submitted through the gateway is authenticated, enriched with the recipient's contact details and consent, rendered from a versioned template, committed to a transactional outbox, published to RabbitMQ, delivered by email, and reported back — with the whole lifecycle queryable through the API.
 
-**What doesn't yet:** push notifications have never been sent to a real device, there is no distributed tracing, and the repository still carries duplicated Prisma schemas and two divergent Compose files. See [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md).
+**What doesn't yet:** push notifications have never been sent to a real device, there is no distributed tracing, and the repository still carries duplicated Prisma schemas and two divergent Compose files. See [`docs/ENGINEERING_LOG.md`](./docs/ENGINEERING_LOG.md).
 
 ---
 
@@ -350,8 +350,10 @@ curl -X POST http://localhost:8000/notifications \
 ├── packages/common/          Shared TypeScript utilities
 ├── infra/                    Docker Compose stacks
 ├── scripts/                  Database bootstrap SQL
-├── docs/ARCHITECTURE.md      Architecture reference
-└── PROJECT_CONTEXT.md        Current-state audit and completion plan
+└── docs/
+    ├── ARCHITECTURE.md       Components, topology, data model, design rationale
+    ├── ENGINEERING_LOG.md    Line-referenced audit of what was broken and why
+    └── contracts/            The message contract between services
 ```
 
 ---
@@ -384,9 +386,27 @@ compiled would have caught none of them.
 
 ---
 
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [Architecture](./docs/ARCHITECTURE.md) | Component responsibilities, messaging topology, data model, and the reasoning behind each decision |
+| [Message contract](./docs/contracts/enriched-notification.md) | The schema every worker consumes, and the rule for changing it |
+| [Engineering log](./docs/ENGINEERING_LOG.md) | A line-referenced record of what was broken, why it was invisible, and how it was fixed |
+
+Each service has its own README covering what it owns and why it works the way
+it does: [gateway](./api-gateway/README.md) ·
+[orchestrator](./services/orchestrator/README.md) ·
+[user](./services/user-service/README.md) ·
+[template](./services/template-service/README.md) ·
+[push](./services/push-service/README.md) ·
+[email](./services/email-service/README.md)
+
+---
+
 ## Roadmap
 
-Tracked in detail in [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md). What remains:
+Tracked in detail in [`docs/ENGINEERING_LOG.md`](./docs/ENGINEERING_LOG.md). What remains:
 
 1. **Prove push delivery** — the FCM client and consumer are built but have never
    sent to a real device. iOS/APNS is a stub.

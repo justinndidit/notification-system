@@ -180,7 +180,6 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	o.notifRepo.UpdateStatus(ctx, notifID, notification.CreatedAt, dtos.StatusEnriching)
 
 	// Fetch user preferences and template concurrently
-	// IMPROVED: Better pattern for concurrent fetches
 	type fetchResult struct {
 		user     dtos.HTTPResponse
 		template dtos.HTTPResponse
@@ -203,22 +202,6 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 
 		go o.templateClient.FetchTemplateById(ctx, req.TemplateCode, &wg, templateChan)
 
-		// wg.Wait()
-
-		// // Read results from channels
-		// select {
-		// case result.user = <-userChan:
-		// default:
-		// 	result.userErr = fmt.Errorf("no user response received")
-		// }
-
-		// select {
-		// case result.template = <-templateChan:
-		// default:
-		// 	result.tempErr = fmt.Errorf("no template response received")
-		// }
-
-		// resultChan <- result
 		wg.Wait()
 		close(userChan) // Close channels after WaitGroup
 		close(templateChan)

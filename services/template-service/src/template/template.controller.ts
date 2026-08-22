@@ -20,7 +20,7 @@ import {
   UpdateTemplateDto,
 } from './dto/create.template.dto';
 import type { JwtRequest, RenderedMessage } from 'src/types/types';
-import { NotificationChannel } from '@prisma/client';
+import { NotificationChannel } from '@notification/template-prisma';
 
 @Controller('template')
 export class TemplateController {

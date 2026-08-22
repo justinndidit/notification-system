@@ -15,7 +15,7 @@ import {
   UpdatePreferenceDto,
 } from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
-import { Preference, Prisma, User } from '@prisma/client';
+import { Preference, Prisma, User } from '@notification/user-prisma';
 import { CacheService } from '../common/cache.service';
 
 @Injectable()
