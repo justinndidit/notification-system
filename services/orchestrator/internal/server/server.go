@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/app"
 )
 
@@ -27,8 +29,10 @@ func (s *Server) SetupHTTPServer(handler http.Handler) {
 	// These are already time.Duration values parsed from strings like "15s".
 	// Multiplying by time.Second again would yield ~475 years.
 	s.httpServer = &http.Server{
-		Addr:         ":" + s.App.Config.Server.Port,
-		Handler:      handler,
+		Addr: ":" + s.App.Config.Server.Port,
+		// Starts a server span per request and continues any trace the caller
+		// propagated, so the gateway and orchestrator share one trace.
+		Handler:      otelhttp.NewHandler(handler, "orchestrator"),
 		ReadTimeout:  s.App.Config.Server.ReadTimeout,
 		WriteTimeout: s.App.Config.Server.WriteTimeout,
 		IdleTimeout:  s.App.Config.Server.IdleTimeout,

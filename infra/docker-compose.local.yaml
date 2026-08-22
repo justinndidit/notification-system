@@ -79,6 +79,7 @@ services:
       # Server
       PORT: 3007
       NODE_ENV: development
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
       # Database
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/user_service_db
@@ -122,6 +123,7 @@ services:
       # Server
       PORT: 3003
       NODE_ENV: development
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
       # Database
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/template_service_db
@@ -200,6 +202,7 @@ services:
       # Signs short-lived service tokens; must match the JWT_SECRET the
       # NestJS services validate with.
       ORCHESTRATOR_EXTERNAL.JWT_SECRET: ${JWT_SECRET}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
     ports:
       - "3002:8080"
@@ -241,6 +244,7 @@ services:
       PORT: "8080"
       ENVIRONMENT: "development"
       LOG_LEVEL: "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
       # RabbitMQ - This pattern is GREAT.
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
@@ -301,6 +305,7 @@ services:
       # Server
       PORT: 8000
       NODE_ENV: development
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
 
       # JWT
       JWT_SECRET: ${JWT_SECRET}
@@ -359,6 +364,7 @@ services:
     restart: unless-stopped
     environment: &email-env
       DJANGO_SETTINGS_MODULE: email_service.settings
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
       DEBUG: "True"
       SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-insecure-key}
       ALLOWED_HOSTS: "*"
@@ -464,6 +470,21 @@ services:
       - backend
 
   # ==================== Admin/Monitoring Services ====================
+
+  # Traces. Jaeger's all-in-one image speaks OTLP directly, so no separate
+  # collector is needed at this scale.
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4318:4318"     # OTLP/HTTP
+    networks:
+      - backend
+
 
   prometheus:
     image: prom/prometheus:latest

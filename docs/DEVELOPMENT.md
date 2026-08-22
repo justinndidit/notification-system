@@ -34,12 +34,13 @@ services/
       database/           Migrations, partitions
       auth/               Service tokens
       metrics/            Prometheus collectors
+      tracing/            OpenTelemetry setup and AMQP propagation
   user-service/           NestJS + Prisma
   template-service/       NestJS + Prisma
   push-service/           Go — FCM consumer
   email-service/          Django + Celery
 packages/common/          Shared TypeScript utilities
-infra/                    Compose stack, Prometheus, Grafana
+infra/                    Compose stack, Prometheus, Grafana, Jaeger
 scripts/                  Database bootstrap, smoke test
 docs/                     This documentation
 ```
@@ -177,6 +178,34 @@ safe; renaming or removing one is not.
 **NestJS services** — `pnpm prisma migrate dev --name <change>`, then regenerate
 the client. Each service owns only its own models; the two schemas are
 independent.
+
+### Adding a span
+
+Use the service's tracer and record the identifiers that make a span findable:
+
+```go
+ctx, span := tracing.Tracer().Start(ctx, "notification.something")
+defer span.End()
+tracing.CorrelationID(span, correlationStr)
+```
+
+Two boundaries need explicit handling — instrumentation libraries cover neither:
+
+**Crossing the queue.** Inject on publish with `tracing.InjectAMQP(ctx, headers)`
+and extract on consume with `tracing.ExtractAMQP(ctx, delivery.Headers)`.
+Producer and consumer share no connection, so without this a trace ends at
+publish and an unrelated one begins at consume.
+
+**Detaching from a request.** Work that outlives its request cannot use the
+request context — that is cancelled when the response is written. Carry the span
+context onto a background one instead:
+
+```go
+ctx := trace.ContextWithSpanContext(
+    context.Background(),
+    trace.SpanContextFromContext(r.Context()),
+)
+```
 
 ### Adding a metric
 

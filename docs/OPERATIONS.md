@@ -94,6 +94,7 @@ arrived, and re-submits to confirm deduplication. This is what CI runs.
 | Service | URL | Credentials |
 |---|---|---|
 | Grafana | http://localhost:3001 | `GRAFANA_USER` / `GRAFANA_PASSWORD` (default admin/admin) |
+| Jaeger | http://localhost:16686 | — |
 | Prometheus | http://localhost:9090 | — |
 | RabbitMQ | http://localhost:15672 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` |
 | MailHog | http://localhost:8025 | — |
@@ -123,6 +124,53 @@ Per-queue depth comes from RabbitMQ's `/metrics/detailed` endpoint as
 `rabbitmq_detailed_queue_messages`. The default `/metrics` aggregates across all
 queues and drops the queue label, which makes it useless for alerting on a
 specific queue or on the DLQ.
+
+---
+
+## Tracing
+
+Every service exports OpenTelemetry spans over OTLP to Jaeger, controlled by one
+variable:
+
+| Variable | Purpose |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector base URL, e.g. `http://jaeger:4318`. **Unset disables tracing** — services run untraced rather than failing |
+| `OTEL_TRACES_SAMPLER_ARG` | Sampling ratio between 0 and 1. Unset samples everything |
+| `SERVICE_VERSION` | Reported as `service.version` |
+
+Sampling is parent-based, so a decision made at the edge is honoured downstream
+rather than re-rolled at each hop — a trace is either complete or absent, never
+half-recorded.
+
+### Finding a specific notification
+
+Spans carry `notification.correlation_id`, `notification.id` and
+`notification.channel`. In the Jaeger UI, search the `orchestrator` service and
+filter by tag:
+
+```
+notification.correlation_id=b2a1f0c9-1234-4d5e-8f90-1a2b3c4d5e6f
+```
+
+The same correlation ID appears on every log line, so a trace can be found from
+a log and a log from a trace.
+
+### What a complete trace looks like
+
+```
+api-gateway     POST /notifications        (rate limit, auth, proxy)
+orchestrator    POST → notification.enrich
+                ├── user-service      GET /user/:id/delivery-profile
+                ├── template-service  GET /template/:id
+                └── template-service  POST /template/:id/render
+orchestrator    notification.publish       (outbox → RabbitMQ)
+email-service   email.bridge.dispatch      (continues across the queue)
+                └── run/send_email_task    (Celery worker → SMTP)
+                    └── POST /notifications/status
+```
+
+A trace that stops at `notification.publish` means the message was published but
+no consumer picked it up — check queue depth and consumer counts.
 
 ---
 

@@ -456,8 +456,32 @@ Seven alert rules cover backlog, exhausted entries, dead-letter arrivals, queue
 depth, enrichment failure rate, dependency health and sustained recoveries. See
 [Operations](./OPERATIONS.md).
 
-Correlation IDs thread through every log line and every AMQP message.
-Distributed tracing is not implemented.
+### Distributed tracing
+
+OpenTelemetry spans every service, exported over OTLP to Jaeger. A single trace
+runs from the client's request at the gateway, through enrichment and both
+domain services, across the queue, and into the worker that delivers.
+
+Two boundaries need explicit handling, because neither is covered by
+instrumentation libraries:
+
+**The queue hop.** Producer and consumer share no connection, so trace context
+travels in AMQP message headers — injected on publish, extracted on consume. A
+worker's spans therefore continue the trace that produced the message rather
+than beginning an unrelated one.
+
+**The async handoff.** Enrichment outlives the request that triggered it, so it
+cannot use the request's context — that is cancelled the moment the `202` is
+written. The span context is carried onto a background context instead, keeping
+the work in the caller's trace without inheriting its cancellation.
+
+Spans carry `notification.correlation_id`, `notification.id` and
+`notification.channel`, so a trace can be found from a log line and a log line
+from a trace.
+
+Tracing is optional throughout: without `OTEL_EXPORTER_OTLP_ENDPOINT` each
+service runs untraced rather than failing, so a missing collector can never take
+down delivery.
 
 ---
 

@@ -13,6 +13,7 @@ import (
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/services"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/utils"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type NotificationHandler struct {
@@ -113,7 +114,17 @@ func (h *NotificationHandler) HandleNotificationRequest(w http.ResponseWriter, r
 	h.logger.Info().Msg("Passed")
 
 	// 5. Enrich notification data asynchronously
-	go h.orchestrator.EnrichAndPublish(context.Background(), body, correlationUUID, idempotencyKey)
+	// Enrichment outlives the request, so it cannot use the request context —
+	// that is cancelled the moment the 202 is written. Carrying the span context
+	// onto a background context keeps the work in the caller's trace without
+	// inheriting its cancellation, so one trace runs from submission through to
+	// delivery rather than breaking at the async boundary.
+	enrichCtx := trace.ContextWithSpanContext(
+		context.Background(),
+		trace.SpanContextFromContext(r.Context()),
+	)
+
+	go h.orchestrator.EnrichAndPublish(enrichCtx, body, correlationUUID, idempotencyKey)
 
 	// 6. Return immediate response
 	data := map[string]any{

@@ -12,6 +12,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/dtos"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type BaseHTTPClient struct {
@@ -28,11 +29,14 @@ func NewBaseHTTPClient(logger *zerolog.Logger, tokenProvider func() (string, err
 		tokenProvider: tokenProvider,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
+			// otelhttp propagates trace context on every outbound call and
+			// records a client span, so enrichment shows up as children of the
+			// request that triggered it rather than as unattributed latency.
+			Transport: otelhttp.NewTransport(&http.Transport{
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 10,
 				IdleConnTimeout:     90 * time.Second,
-			},
+			}),
 		},
 	}
 }

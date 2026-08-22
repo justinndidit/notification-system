@@ -30,7 +30,7 @@ The caller gets a `202 Accepted` immediately. Delivery happens asynchronously, a
 | Template Service | Template CRUD, immutable versioning, Handlebars rendering |
 | Push Service | RabbitMQ consumer delivering through FCM HTTP v1 |
 | Email Service | Django and Celery, bridged to the queue, delivering through SMTP |
-| Infrastructure | Postgres, Redis, RabbitMQ, Prometheus, Grafana, MailHog via Docker Compose |
+| Infrastructure | Postgres, Redis, RabbitMQ, Prometheus, Grafana, Jaeger, MailHog via Docker Compose |
 
 A notification submitted through the gateway is authenticated, enriched with the
 recipient's contact details and consent, rendered from a versioned template,
@@ -38,7 +38,10 @@ committed to a transactional outbox, published to RabbitMQ, delivered, and
 reported back — with the whole lifecycle queryable through the API.
 
 Around 80 unit tests run alongside an end-to-end CI job that builds every image,
-starts the full stack and delivers a real notification.
+starts the full stack and delivers a real notification. Prometheus metrics,
+Grafana dashboards and OpenTelemetry traces cover the running system — a single
+trace follows a notification from the gateway, through enrichment, across the
+queue, to the worker that delivers it.
 
 ---
 
@@ -348,14 +351,13 @@ it does: [gateway](./api-gateway/README.md) ·
 
 ## Roadmap
 
-1. **Distributed tracing** — correlation IDs already thread through every log
-   line and AMQP message; OpenTelemetry would join them into spans across Go,
-   NestJS and Django.
-2. **APNS** — iOS device tokens are accepted and carried through the contract,
+1. **APNS** — iOS device tokens are accepted and carried through the contract,
    but only FCM delivery is implemented.
-3. **SMS** — the queue and routing key exist; the channel needs a consumer.
-4. **Deployment** — Kubernetes manifests. The stateless services are ready for
+2. **SMS** — the queue and routing key exist; the channel needs a consumer.
+3. **Deployment** — Kubernetes manifests. The stateless services are ready for
    it; nothing is written yet.
+4. **Event log retention** — `notifications` is partitioned so retention is a
+   `DROP TABLE`; `notification_events` still grows without bound.
 
 ---
 

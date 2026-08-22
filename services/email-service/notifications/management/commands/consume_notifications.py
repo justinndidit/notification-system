@@ -20,8 +20,11 @@ import time
 import pika
 from django.core.management.base import BaseCommand
 
+from opentelemetry.propagate import extract
+
 from notifications.logging_config import celery_logger
 from notifications.tasks import send_email_task
+from notifications.tracing import tracer
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", "5672"))
@@ -167,9 +170,25 @@ class Command(BaseCommand):
     def _on_message(self, channel, method, properties, body):
         correlation_id = getattr(properties, "correlation_id", None)
 
+        # Continue the trace the orchestrator started. A queue hop shares no
+        # connection between producer and consumer, so without extracting the
+        # context from the headers this work would form an unrelated trace.
+        headers = getattr(properties, "headers", None) or {}
+        parent = extract({k: v for k, v in headers.items() if isinstance(v, str)})
+
+        with tracer().start_as_current_span("email.bridge.dispatch", context=parent) as span:
+            span.set_attribute("messaging.system", "rabbitmq")
+            span.set_attribute("messaging.destination.name", QUEUE)
+            if correlation_id:
+                span.set_attribute("notification.correlation_id", correlation_id)
+
+            self._dispatch(channel, method, body, correlation_id, span)
+
+    def _dispatch(self, channel, method, body, correlation_id, span):
         try:
             message = json.loads(body)
         except json.JSONDecodeError as exc:
+            span.record_exception(exc)
             celery_logger.error(
                 f"Discarding malformed message: {exc}",
                 extra={"correlation_id": correlation_id},
@@ -182,6 +201,7 @@ class Command(BaseCommand):
             payload = to_task_payload(message)
             send_email_task.delay(payload)
         except Exception as exc:
+            span.record_exception(exc)
             celery_logger.error(
                 f"Failed to enqueue email task: {exc}",
                 extra={"correlation_id": correlation_id},
@@ -191,6 +211,7 @@ class Command(BaseCommand):
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
             return
 
+        span.set_attribute("notification.id", payload.get("notification_id") or "")
         celery_logger.info(
             "Dispatched email task",
             extra={
