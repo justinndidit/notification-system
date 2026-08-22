@@ -143,10 +143,10 @@ func (o *Orchestrator) RecordDeliveryStatus(ctx context.Context, req dtos.Status
 		if errMsg == "" {
 			errMsg = "delivery failed"
 		}
-		if err := o.notifRepo.UpdateFailure(ctx, notifID, "DELIVERY_ERROR", errMsg); err != nil {
+		if err := o.notifRepo.UpdateFailure(ctx, notifID, notif.CreatedAt, "DELIVERY_ERROR", errMsg); err != nil {
 			return err
 		}
-	} else if err := o.notifRepo.UpdateStatus(ctx, notifID, status); err != nil {
+	} else if err := o.notifRepo.UpdateStatus(ctx, notifID, notif.CreatedAt, status); err != nil {
 		return err
 	}
 
@@ -210,7 +210,7 @@ func (o *Orchestrator) RetryNotification(ctx context.Context, id uuid.UUID) (*dt
 		return nil, err
 	}
 
-	if err := o.notifRepo.UpdateStatus(ctx, id, dtos.StatusQueued); err != nil {
+	if err := o.notifRepo.UpdateStatus(ctx, id, notif.CreatedAt, dtos.StatusQueued); err != nil {
 		return nil, err
 	}
 

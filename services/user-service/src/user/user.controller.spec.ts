@@ -11,7 +11,6 @@ describe('UserController', () => {
       controllers: [UserController],
       providers: [
         { provide: UserService, useValue: {} },
-        // Required by ServiceOrJwtGuard, which guards the preference route.
         { provide: ConfigService, useValue: { get: () => 'test-service-token' } },
       ],
     }).compile();

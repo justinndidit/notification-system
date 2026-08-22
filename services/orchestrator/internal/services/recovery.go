@@ -81,7 +81,7 @@ func (o *Orchestrator) recoverStuckNotifications(ctx context.Context) error {
 				Str("notification_id", notification.ID.String()).
 				Msg("Cannot reconstruct request for stuck notification, marking failed")
 
-			o.notifRepo.UpdateFailure(sweepCtx, notification.ID, "UNRECOVERABLE",
+			o.notifRepo.UpdateFailure(sweepCtx, notification.ID, notification.CreatedAt, "UNRECOVERABLE",
 				"notification was abandoned and its request could not be reconstructed")
 			o.eventRepo.CreateEventSimple(sweepCtx, notification.ID, notification.CorrelationID,
 				dtos.EventFailed, models.JSONMap{"stage": "recovery", "error": "unrecoverable"})

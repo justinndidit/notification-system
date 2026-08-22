@@ -19,7 +19,7 @@ func SetupRoutes(app *app.App) *chi.Mux {
 		// directly rather than through the gateway, so this route carries its
 		// own service-token check. Declared before /{id} so the literal segment
 		// wins over the wildcard.
-		r.With(requireServiceToken(app.Config.External.InternalToken)).
+		r.With(requireServiceToken(app.ServiceVerifier)).
 			Post("/status", app.NHandler.HandleStatusCallback)
 		r.Get("/correlation/{correlationID}", app.NHandler.HandleGetNotificationByCorrelation)
 

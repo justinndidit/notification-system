@@ -11,7 +11,6 @@ describe('TemplateController', () => {
       controllers: [TemplateController],
       providers: [
         { provide: TemplateService, useValue: {} },
-        // Required by ServiceOrJwtGuard, which guards the enrichment routes.
         {
           provide: ConfigService,
           useValue: { get: () => 'test-service-token' },

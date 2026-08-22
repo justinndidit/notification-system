@@ -1,7 +1,12 @@
-import os
-import requests
-import pika
+import base64
+import hashlib
+import hmac
 import json
+import os
+import time
+
+import pika
+import requests
 
 from .logging_config import celery_logger
 
@@ -9,7 +14,50 @@ from .logging_config import celery_logger
 TEMPLATE_SERVICE_URL = os.getenv('TEMPLATE_SERVICE_URL', 'http://template-service:3003')
 # The orchestrator owns notification status.
 STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://orchestrator:8080/notifications/status')
-INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN', '')
+JWT_SECRET = os.getenv('JWT_SECRET', '')
+SERVICE_NAME = 'email-service'
+SERVICE_TOKEN_TTL_SECONDS = 300
+
+
+def mint_service_token():
+    """
+    Mint a short-lived service token for calling other services.
+
+    Replaces a static shared secret: these expire in minutes and identify the
+    caller, so a leaked one stops working on its own. HS256 with the same
+    JWT_SECRET every service already validates against.
+    """
+    if not JWT_SECRET:
+        return None
+
+    now = int(time.time())
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "user_id": SERVICE_NAME,
+        "role": "service",
+        "iss": SERVICE_NAME,
+        "sub": SERVICE_NAME,
+        "iat": now,
+        "exp": now + SERVICE_TOKEN_TTL_SECONDS,
+    }
+
+    def b64(raw):
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    segments = [
+        b64(json.dumps(header, separators=(",", ":")).encode()),
+        b64(json.dumps(payload, separators=(",", ":")).encode()),
+    ]
+    signing_input = ".".join(segments).encode()
+    signature = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+    segments.append(b64(signature))
+
+    return ".".join(segments)
+
+
+def service_auth_headers():
+    token = mint_service_token()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
 RABBITMQ_PASSWORD = os.getenv('RABBITMQ_PASSWORD', 'guest')
@@ -23,7 +71,7 @@ def fetch_email_template(template_code):
     try:
         resp = requests.get(
             f'{TEMPLATE_SERVICE_URL}/template/{template_code}',
-            headers={'X-Service-Token': INTERNAL_SERVICE_TOKEN},
+            headers=service_auth_headers(),
             timeout=5,
         )
         resp.raise_for_status()
@@ -52,7 +100,7 @@ def report_status(notification_id, status, error=None):
         requests.post(
             STATUS_CALLBACK_URL,
             json=payload,
-            headers={'X-Service-Token': INTERNAL_SERVICE_TOKEN},
+            headers=service_auth_headers(),
             timeout=5,
         )
     except Exception as exc:

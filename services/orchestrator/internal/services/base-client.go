@@ -17,14 +17,15 @@ import (
 type BaseHTTPClient struct {
 	logger     *zerolog.Logger
 	httpClient *http.Client
-	// Headers attached to every outgoing request (e.g. the internal service token).
-	defaultHeaders map[string]string
+	// Supplies a fresh service token per request. Tokens expire, so this cannot
+	// be a static header captured at construction.
+	tokenProvider func() (string, error)
 }
 
-func NewBaseHTTPClient(logger *zerolog.Logger, defaultHeaders map[string]string) *BaseHTTPClient {
+func NewBaseHTTPClient(logger *zerolog.Logger, tokenProvider func() (string, error)) *BaseHTTPClient {
 	return &BaseHTTPClient{
-		logger:         logger,
-		defaultHeaders: defaultHeaders,
+		logger:        logger,
+		tokenProvider: tokenProvider,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -53,8 +54,12 @@ func (b *BaseHTTPClient) execute(ctx context.Context, method, url string, payloa
 			return backoff.Permanent(err)
 		}
 
-		for k, v := range b.defaultHeaders {
-			req.Header.Set(k, v)
+		if b.tokenProvider != nil {
+			token, tokenErr := b.tokenProvider()
+			if tokenErr != nil {
+				return backoff.Permanent(fmt.Errorf("could not obtain a service token: %w", tokenErr))
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")

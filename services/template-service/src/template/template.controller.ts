@@ -13,7 +13,6 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { TemplateService } from './template.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ServiceOrJwtGuard } from '../common/service-or-jwt.guard';
 import {
   CreateTemplateDto,
   PaginationDto,
@@ -58,13 +57,13 @@ export class TemplateController {
     return this.templatesService.getPaginatedTemplates(paginationDto, filters);
   }
 
-  @UseGuards(ServiceOrJwtGuard)
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(@Param('id') id: string, @Query('history') includeHistory?: boolean) {
     return this.templatesService.findOne(id, includeHistory);
   }
 
-  @UseGuards(ServiceOrJwtGuard)
+  @UseGuards(JwtAuthGuard)
   @Post(':id/render')
   render(
     @Param('id') id: string,
@@ -73,7 +72,7 @@ export class TemplateController {
     return this.templatesService.render(id, renderDto);
   }
 
-  @UseGuards(ServiceOrJwtGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('event/:event/channel/:channel')
   getByEvent(
     @Param('event') event: string,

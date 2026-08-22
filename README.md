@@ -2,7 +2,7 @@
 
 A multi-channel notification platform built as a polyglot microservices monorepo — NestJS at the edge, Go for orchestration and push delivery, Django + Celery for email, with RabbitMQ decoupling ingestion from delivery.
 
-Built to work through real distributed-systems problems end to end: async task queues, service enrichment, idempotency, retry and dead-letter handling, circuit breakers, and cross-service correlation.
+Built to work through real distributed-systems problems end to end: a transactional outbox that survives a broker restart, correct idempotency semantics, dead-letter handling, publisher confirms, circuit breakers, and cross-service correlation.
 
 ---
 
@@ -22,23 +22,23 @@ The caller gets a `202 Accepted` immediately. Delivery happens asynchronously, a
 
 ## Project status
 
-**This is a work in progress.** Every service runs; the pipeline between them is not yet connected end to end.
+Email delivery works end to end and is covered by CI. Push delivery is built but unproven against a real FCM project.
 
 | Component | State | Notes |
 |---|---|---|
-| API Gateway | Working | JWT validation, proxying, correlation/idempotency header injection. Rate limiting is built but not wired up |
-| Orchestrator | Partial | Ingest, enrich, persist, and publish all work. No status/query API yet |
-| User Service | Working | Auth, profiles, preferences, push tokens, Redis caching |
-| Template Service | Working | Full CRUD, versioning, filtering, Handlebars rendering, Redis caching |
-| Push Service | Partial | AMQP consumer + FCM v1 client are built. Doesn't yet receive usable messages |
-| Email Service | Standalone | Complete and works on its own. Not yet connected to the queue or deployed in Compose |
-| Infrastructure | Working | Postgres, Redis, RabbitMQ, pgAdmin via Docker Compose |
-| Tests | Not started | Spec files are scaffolding stubs; no meaningful coverage |
-| Observability | Not started | Structured logs and correlation IDs only — no metrics or tracing |
+| API Gateway | Working | JWT auth and Redis-backed rate limiting enforced on every proxied route |
+| Orchestrator | Working | Enrichment, rendering, transactional outbox, status/query API, retry |
+| User Service | Working | Auth, profiles, preferences, device tokens, Redis caching |
+| Template Service | Working | CRUD, versioning, filtering, Handlebars rendering, Redis caching |
+| Push Service | Built, unproven | AMQP consumer and FCM v1 client run; never exercised against a real FCM project. iOS/APNS is a stub |
+| Email Service | Working | Django + Celery, bridged to the queue, delivering through SMTP |
+| Infrastructure | Working | Postgres, Redis, RabbitMQ, Prometheus, Grafana, MailHog via Docker Compose |
+| Tests | Working | ~80 unit tests plus an end-to-end CI job that builds every image and delivers a real notification |
+| Observability | Metrics | Prometheus metrics, a Grafana dashboard and seven alert rules. Distributed tracing is not built |
 
-**What works today:** you can sign up, authenticate, manage templates and preferences, and submit a notification that gets enriched, persisted, and published to RabbitMQ.
+**What works today:** a notification submitted through the gateway is authenticated, enriched with the recipient's contact details and consent, rendered from a versioned template, committed to a transactional outbox, published to RabbitMQ, delivered by email, and reported back — with the whole lifecycle queryable through the API.
 
-**What doesn't yet:** nothing is delivered at the far end. Email is not attached to the queue, and push messages arrive without device tokens. See [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md) for the full analysis and the plan to close it.
+**What doesn't yet:** push notifications have never been sent to a real device, there is no distributed tracing, and the repository still carries duplicated Prisma schemas and two divergent Compose files. See [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md).
 
 ---
 
@@ -117,8 +117,7 @@ Set at minimum the following in `infra/.env`:
 
 | Variable | Notes |
 |---|---|
-| `JWT_SECRET` | Must be identical across the gateway, user, and template services |
-| `INTERNAL_SERVICE_TOKEN` | Shared secret for service-to-service calls. Required — the orchestrator, user, and template services all refuse to start without it |
+| `JWT_SECRET` | Must be identical across every service. Signs user tokens *and* the short-lived service tokens the orchestrator and email worker mint for internal calls |
 | `DB_PASSWORD` | Postgres password |
 | `RABBITMQ_PASSWORD` | RabbitMQ password |
 | `REDIS_PASSWORD` | Optional; leave unset for a passwordless local Redis |
@@ -131,7 +130,8 @@ docker compose -f infra/docker-compose.local.yaml up --build
 
 This brings up Postgres (with the three databases created by `scripts/init-databases.sql`), Redis, RabbitMQ, pgAdmin, and the gateway, orchestrator, user, template, and push services. The orchestrator runs its own migrations on boot.
 
-> The email service is not yet in Compose — run it separately (see below).
+This includes the email service and its Celery worker, the queue bridge, MailHog
+(so local runs never send real mail), Prometheus and Grafana.
 
 ### 3. Or run services individually
 
@@ -163,7 +163,20 @@ python manage.py runserver 8000
 cd services/email-service && celery -A email_service worker -l info
 ```
 
-### 4. Verify
+### 4. Create the first admin
+
+Templates can only be created by an admin, and `role` is deliberately not
+settable at signup — otherwise anyone could register as one. Bootstrap it once:
+
+```bash
+docker compose -f infra/docker-compose.local.yaml exec \
+  -e ADMIN_EMAIL=admin@example.com -e ADMIN_PASSWORD='choose-a-strong-password' \
+  user-service sh -c 'cd /usr/src/app/services/user-service && pnpm seed:admin'
+```
+
+Idempotent: re-running promotes an existing account rather than duplicating it.
+
+### 5. Verify
 
 ```bash
 curl http://localhost:8000/health                      # API Gateway
@@ -173,7 +186,19 @@ curl http://localhost:3003/template-service/health     # Template Service
 curl http://localhost:8000/health/                     # Email Service (when running)
 ```
 
-Supporting UIs: RabbitMQ management at `http://localhost:15672`, pgAdmin at `http://localhost:5050`.
+### 6. Prove it end to end
+
+```bash
+./scripts/smoke-test.sh
+```
+
+Signs up a user, creates a template, submits a notification, and asserts the
+email actually arrived — then re-submits to confirm it is deduplicated. This is
+the same script CI runs against a freshly built stack.
+
+Supporting UIs: Grafana at `http://localhost:3001`, Prometheus at
+`http://localhost:9090`, MailHog at `http://localhost:8025`, RabbitMQ management
+at `http://localhost:15672`, pgAdmin at `http://localhost:5050`.
 
 ---
 
@@ -198,9 +223,9 @@ The proxy preserves the full request path, so downstream route prefixes must mat
 | `GET` | `/user` | Admin |
 | `GET` | `/user/preference` | Admin |
 | `GET` | `/user/:id` | JWT |
-| `GET` | `/user/preference/:id` | JWT or service token |
+| `GET` | `/user/preference/:id` | JWT (a user's or a service's) |
 | `PATCH` | `/user/:id/preference` | JWT (self) |
-| `PATCH` | `/user/:id/push-token` | JWT (self) |
+| `PATCH` | `/user/:id/device-tokens` | JWT (self) — FCM registration tokens |
 | `PATCH` | `/user/:id/role` | Admin |
 | `GET` | `/user-service/health` | Public |
 
@@ -210,19 +235,26 @@ The proxy preserves the full request path, so downstream route prefixes must mat
 |---|---|---|
 | `POST` | `/template` | Admin |
 | `GET` | `/template` | JWT — paginated, filter by `name`/`language`/`event`/`channel` |
-| `GET` | `/template/:id` | JWT or service token — `?history=true` includes all versions |
-| `POST` | `/template/:id/render` | JWT or service token — renders with Handlebars |
-| `GET` | `/template/event/:event/channel/:channel` | JWT or service token |
+| `GET` | `/template/:id` | JWT — `?history=true` includes all versions |
+| `POST` | `/template/:id/render` | JWT — compiles Handlebars against a supplied context |
+| `GET` | `/template/event/:event/channel/:channel` | JWT |
 | `PATCH` | `/template/:id` | JWT — creates a new version |
 | `DELETE` | `/template/:id` | JWT |
 | `GET` | `/template-service/health` | Public |
 
 ### Orchestrator — `:8080` (mapped to `:3002`)
 
-| Method | Route |
-|---|---|
-| `POST` | `/notifications` |
-| `GET` | `/health` |
+| Method | Route | Notes |
+|---|---|---|
+| `POST` | `/notifications` | Submit; requires `X-Idempotency-Key` |
+| `GET` | `/notifications?user_id=&limit=&cursor=` | Cursor-paginated history |
+| `GET` | `/notifications/{id}` | Single notification with lifecycle timestamps |
+| `GET` | `/notifications/correlation/{id}` | Polling path; Redis-cached |
+| `GET` | `/notifications/{id}/events` | Audit timeline |
+| `POST` | `/notifications/{id}/retry` | Requeue a failed notification |
+| `POST` | `/notifications/status` | Worker callback; service token only |
+| `GET` | `/health` | |
+| `GET` | `/metrics` | Prometheus scrape target |
 
 ### Push Service — `:8080`
 
@@ -339,19 +371,31 @@ cd services/push-service  && go test ./... && go vet ./...
 cd services/email-service && python manage.py test notifications
 ```
 
-Test coverage is the largest outstanding gap. The `.spec.ts` files present today are generated scaffolding, not real tests, and some fail to resolve `src/*` imports under Jest. Building out unit tests and an end-to-end harness across gateway → orchestrator → queue → worker is the top priority after the delivery pipeline is connected.
+CI runs four jobs on every push: Go (vet, gofmt, `-race`), TypeScript, Python,
+and an **end-to-end** job that builds every image, starts the full stack and
+delivers a real notification.
+
+That last job earns its keep. Most failures this project has hit were invisible
+to compilation — an unpinned tool that outgrew its base image, a UTF-16
+`requirements.txt`, a dependency missing from a manifest, a queue argument
+mismatch, and Dockerfiles that only worked because the developer's
+`node_modules` happened to be in the build context. A pipeline that only
+compiled would have caught none of them.
 
 ---
 
 ## Roadmap
 
-Sequenced in detail in [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md):
+Tracked in detail in [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md). What remains:
 
-1. **Connect the pipeline** — resolve recipients and device tokens during enrichment, render templates in the orchestrator, agree one message contract, bridge the email worker onto the queue, and deploy it in Compose.
-2. **Complete the orchestrator API** — status lookup, event timeline, user history, and retry endpoints. The repository layer for these is already written.
-3. **Harden reliability** — transactional outbox, correct idempotency semantics, real dead-letter exchanges, publisher confirms, and scheduled partition maintenance.
-4. **Secure the edge** — move proxying behind Nest guards so auth and rate limiting actually apply.
-5. **Test, then instrument** — real unit and integration coverage, CI, then OpenTelemetry tracing and Prometheus metrics.
+1. **Prove push delivery** — the FCM client and consumer are built but have never
+   sent to a real device. iOS/APNS is a stub.
+2. **Distributed tracing** — correlation IDs already thread through the logs;
+   OpenTelemetry would join them into spans across Go, NestJS and Django.
+3. **Consolidation** — split the duplicated Prisma schema, reconcile the two
+   Compose files, and remove the remaining commented-out code.
+4. **Deployment** — Kubernetes manifests. The stateless services are ready for
+   it; nothing is written yet.
 
 ---
 

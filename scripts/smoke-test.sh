@@ -68,29 +68,25 @@ pass "user id $USER_ID"
 # ---------------------------------------------------------------- template
 step "Create a template"
 
-# Creating a template requires an admin JWT, and there is currently no
-# bootstrap path for the first admin (role is no longer settable at signup, and
-# PATCH /user/:id/role itself requires an admin). For a local smoke test we mint
-# an admin token from the shared JWT_SECRET. Replace this once the services
-# grow a seed/bootstrap command.
-ADMIN_TOKEN=$(python3 - "$USER_ID" "${JWT_SECRET:?JWT_SECRET must be set}" <<'PYJWT'
-import base64, hashlib, hmac, json, sys, time
+# Templates require an admin. Rather than forging a token, use the documented
+# bootstrap: `pnpm seed:admin` in the user service creates or promotes one.
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-bootstrap-admin-pw}"
 
-def b64(raw):
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+ADMIN_SIGNIN=$(curl -fsS -X POST "$GATEWAY/user/signin" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" 2>/dev/null) \
+  || fail "no admin account. Seed one first:
+    docker compose -f infra/docker-compose.local.yaml exec \\
+      -e ADMIN_EMAIL=$ADMIN_EMAIL -e ADMIN_PASSWORD=$ADMIN_PASSWORD \\
+      user-service sh -c 'cd /usr/src/app/services/user-service && pnpm seed:admin'"
 
-user_id, secret = sys.argv[1], sys.argv[2]
-header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-payload = b64(json.dumps(
-    {"user_id": user_id, "role": "admin", "iat": int(time.time()), "exp": int(time.time()) + 900},
-    separators=(",", ":"),
-).encode())
-signing_input = f"{header}.{payload}".encode()
-signature = b64(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
-print(f"{header}.{payload}.{signature}")
-PYJWT
-)
-[ -n "$ADMIN_TOKEN" ] || fail "could not mint an admin token"
+ADMIN_TOKEN=$(echo "$ADMIN_SIGNIN" | jq -r '.data.token // .token')
+[ -n "$ADMIN_TOKEN" ] && [ "$ADMIN_TOKEN" != "null" ] || fail "admin signin returned no token"
+
+ADMIN_ROLE=$(echo "$ADMIN_SIGNIN" | jq -r '.data.role // .role')
+[ "$ADMIN_ROLE" = "admin" ] || fail "$ADMIN_EMAIL is not an admin (role: $ADMIN_ROLE)"
+pass "authenticated as admin $ADMIN_EMAIL"
 
 TEMPLATE_RESP=$(curl -fsS -X POST "$TEMPLATE/template" \
   -H 'Content-Type: application/json' \

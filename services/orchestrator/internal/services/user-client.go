@@ -14,12 +14,10 @@ type UserClient struct {
 	userAddress string
 }
 
-func NewUserClient(logger *zerolog.Logger, address, serviceToken string) *UserClient {
+func NewUserClient(logger *zerolog.Logger, address string, tokenProvider func() (string, error)) *UserClient {
 	return &UserClient{
 		userAddress: address,
-		baseClient: NewBaseHTTPClient(logger, map[string]string{
-			"X-Service-Token": serviceToken,
-		}),
+		baseClient:  NewBaseHTTPClient(logger, tokenProvider),
 	}
 }
 
