@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/go-redis/redis/v8"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/auth"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/config"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/database"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/handlers"
@@ -15,6 +16,8 @@ type App struct {
 	Config      *config.Config
 	NHandler    *handlers.NotificationHandler
 	HHandler    *handlers.HealthHandler
+	// Verifies inbound service tokens on routes workers call directly.
+	ServiceVerifier *auth.Verifier
 }
 
 func NewApp(primary *config.Config,
@@ -22,13 +25,15 @@ func NewApp(primary *config.Config,
 	rdb *redis.Client,
 	db *database.Database,
 	nHandler *handlers.NotificationHandler,
-	hHandler *handlers.HealthHandler) *App {
+	hHandler *handlers.HealthHandler,
+	serviceVerifier *auth.Verifier) *App {
 	return &App{
-		Logger:      log,
-		RedisClient: rdb,
-		DB:          db,
-		Config:      primary,
-		NHandler:    nHandler,
-		HHandler:    hHandler,
+		Logger:          log,
+		RedisClient:     rdb,
+		DB:              db,
+		Config:          primary,
+		NHandler:        nHandler,
+		HHandler:        hHandler,
+		ServiceVerifier: serviceVerifier,
 	}
 }

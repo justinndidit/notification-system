@@ -14,12 +14,10 @@ type TemplateClient struct {
 	baseClient    *BaseHTTPClient
 }
 
-func NewTemplateClient(logger *zerolog.Logger, address, serviceToken string) *TemplateClient {
+func NewTemplateClient(logger *zerolog.Logger, address string, tokenProvider func() (string, error)) *TemplateClient {
 	return &TemplateClient{
 		clientAddress: address,
-		baseClient: NewBaseHTTPClient(logger, map[string]string{
-			"X-Service-Token": serviceToken,
-		}),
+		baseClient:    NewBaseHTTPClient(logger, tokenProvider),
 	}
 }
 

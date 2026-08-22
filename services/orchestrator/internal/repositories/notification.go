@@ -90,7 +90,7 @@ func (r *NotificationRepository) CreateNotification(ctx context.Context, notif *
 
 // UpdateStatusWithTimestamp updates notification status with appropriate timestamp
 // This consolidates status updates to prevent race conditions
-func (r *NotificationRepository) UpdateStatusWithTimestamp(ctx context.Context, id uuid.UUID, status string) error {
+func (r *NotificationRepository) UpdateStatusWithTimestamp(ctx context.Context, id uuid.UUID, createdAt time.Time, status string) error {
 	var timestampColumn string
 	switch status {
 	case "enriching":
@@ -114,18 +114,18 @@ func (r *NotificationRepository) UpdateStatusWithTimestamp(ctx context.Context, 
 			SET status = $1,
 				%s = COALESCE(%s, NOW()),
 				updated_at = NOW()
-			WHERE id = $2 AND deleted_at IS NULL
+			WHERE id = $2 AND created_at = $3 AND deleted_at IS NULL
 		`, timestampColumn, timestampColumn)
 	} else {
 		query = `
 			UPDATE notifications
 			SET status = $1,
 				updated_at = NOW()
-			WHERE id = $2 AND deleted_at IS NULL
+			WHERE id = $2 AND created_at = $3 AND deleted_at IS NULL
 		`
 	}
 
-	result, err := r.pool.Exec(ctx, query, status, id)
+	result, err := r.pool.Exec(ctx, query, status, id, createdAt)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id.String()).Str("status", status).Msg("Failed to update status")
 		return fmt.Errorf("failed to update status: %w", err)
@@ -139,34 +139,8 @@ func (r *NotificationRepository) UpdateStatusWithTimestamp(ctx context.Context, 
 }
 
 // UpdateStatus updates notification status (kept for backward compatibility)
-func (r *NotificationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
-	return r.UpdateStatusWithTimestamp(ctx, id, status)
-}
-
-// UpdateEnrichedPayload stores the enriched notification data WITHOUT changing status
-// Status should be updated separately via UpdateStatus
-func (r *NotificationRepository) UpdateEnrichedPayload(ctx context.Context, id uuid.UUID, payload models.JSONMap, recipient string) error {
-	// The resolved recipient is stored alongside the payload so status queries
-	// can show where a notification was sent without decoding enriched_payload.
-	query := `
-		UPDATE notifications
-		SET enriched_payload = $1,
-		    recipient = NULLIF($2, ''),
-		    updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL
-	`
-
-	result, err := r.pool.Exec(ctx, query, payload, recipient, id)
-	if err != nil {
-		r.logger.Error().Err(err).Str("id", id.String()).Msg("Failed to update enriched payload")
-		return fmt.Errorf("failed to update enriched payload: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("notification not found or already deleted")
-	}
-
-	return nil
+func (r *NotificationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, createdAt time.Time, status string) error {
+	return r.UpdateStatusWithTimestamp(ctx, id, createdAt, status)
 }
 
 // CreateNotificationWithTransaction creates a notification within a transaction
@@ -539,7 +513,7 @@ func (r *NotificationRepository) GetUserNotifications(ctx context.Context, userI
 }
 
 // UpdateFailure records a notification failure
-func (r *NotificationRepository) UpdateFailure(ctx context.Context, id uuid.UUID, errorCode, errorMsg string) error {
+func (r *NotificationRepository) UpdateFailure(ctx context.Context, id uuid.UUID, createdAt time.Time, errorCode, errorMsg string) error {
 	query := `
 		UPDATE notifications
 		SET status = 'failed',
@@ -548,10 +522,10 @@ func (r *NotificationRepository) UpdateFailure(ctx context.Context, id uuid.UUID
 		    retry_count = retry_count + 1,
 		    failed_at = COALESCE(failed_at, NOW()),
 		    updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL
+		WHERE id = $3 AND created_at = $4 AND deleted_at IS NULL
 	`
 
-	result, err := r.pool.Exec(ctx, query, errorCode, errorMsg, id)
+	result, err := r.pool.Exec(ctx, query, errorCode, errorMsg, id, createdAt)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id.String()).Msg("Failed to update failure")
 		return fmt.Errorf("failed to update failure: %w", err)
@@ -673,14 +647,14 @@ func (r *NotificationRepository) GetStatsByDateRange(ctx context.Context, startD
 }
 
 // SoftDelete soft deletes a notification
-func (r *NotificationRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
+func (r *NotificationRepository) SoftDelete(ctx context.Context, id uuid.UUID, createdAt time.Time) error {
 	query := `
 		UPDATE notifications
 		SET deleted_at = NOW(), updated_at = NOW()
-		WHERE id = $1 AND deleted_at IS NULL
+		WHERE id = $1 AND created_at = $2 AND deleted_at IS NULL
 	`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	result, err := r.pool.Exec(ctx, query, id, createdAt)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id.String()).Msg("Failed to delete notification")
 		return fmt.Errorf("failed to delete notification: %w", err)

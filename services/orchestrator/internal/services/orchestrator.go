@@ -177,7 +177,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	})
 
 	// Update status to enriching
-	o.notifRepo.UpdateStatus(ctx, notifID, dtos.StatusEnriching)
+	o.notifRepo.UpdateStatus(ctx, notifID, notification.CreatedAt, dtos.StatusEnriching)
 
 	// Fetch user preferences and template concurrently
 	// IMPROVED: Better pattern for concurrent fetches
@@ -253,7 +253,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			Str("error", errMsg).
 			Msg("Failed to fetch user preferences")
 
-		o.notifRepo.UpdateFailure(ctx, notifID, "USER_FETCH_ERROR", errMsg)
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "USER_FETCH_ERROR", errMsg)
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": errMsg,
 			"stage": "user_fetch",
@@ -273,7 +273,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			Str("error", errMsg).
 			Msg("Failed to fetch template")
 
-		o.notifRepo.UpdateFailure(ctx, notifID, "TEMPLATE_FETCH_ERROR", errMsg)
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "TEMPLATE_FETCH_ERROR", errMsg)
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": errMsg,
 			"stage": "template_fetch",
@@ -289,7 +289,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	userDataBytes, _ := json.Marshal(result.user.Data)
 	if err := json.Unmarshal(userDataBytes, &profile); err != nil {
 		o.logger.Error().Err(err).Msg("Failed to parse user preferences")
-		o.notifRepo.UpdateFailure(ctx, notifID, "PARSE_ERROR", "Invalid user delivery profile format")
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "PARSE_ERROR", "Invalid user delivery profile format")
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": err.Error(),
 			"stage": "profile_parse",
@@ -301,7 +301,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	templateDataBytes, _ := json.Marshal(result.template.Data)
 	if err := json.Unmarshal(templateDataBytes, &template); err != nil {
 		o.logger.Error().Err(err).Msg("Failed to parse template")
-		o.notifRepo.UpdateFailure(ctx, notifID, "PARSE_ERROR", "Invalid template format")
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "PARSE_ERROR", "Invalid template format")
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": err.Error(),
 			"stage": "template_parse",
@@ -318,7 +318,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			Str("channel", string(req.NotificationType)).
 			Msg("User has opted out of this channel")
 
-		o.notifRepo.UpdateStatus(ctx, notifID, dtos.StatusCancelled)
+		o.notifRepo.UpdateStatus(ctx, notifID, notification.CreatedAt, dtos.StatusCancelled)
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventCancelled, models.JSONMap{
 			"reason":  "user_opted_out",
 			"channel": string(req.NotificationType),
@@ -337,7 +337,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	recipient, err := o.resolveRecipient(req.NotificationType, profile)
 	if err != nil {
 		o.logger.Error().Err(err).Str("correlation_id", correlationStr).Msg("Cannot resolve recipient")
-		o.notifRepo.UpdateFailure(ctx, notifID, "NO_RECIPIENT", err.Error())
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "NO_RECIPIENT", err.Error())
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": err.Error(),
 			"stage": "recipient_resolution",
@@ -351,7 +351,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	rendered, err := o.renderForChannel(ctx, req, profile, correlationStr)
 	if err != nil {
 		o.logger.Error().Err(err).Str("correlation_id", correlationStr).Msg("Failed to render template")
-		o.notifRepo.UpdateFailure(ctx, notifID, "RENDER_ERROR", err.Error())
+		o.notifRepo.UpdateFailure(ctx, notifID, notification.CreatedAt, "RENDER_ERROR", err.Error())
 		o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 			"error": err.Error(),
 			"stage": "render",
@@ -398,7 +398,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 	payload, err := toJSONMap(enrichedNotification)
 	if err != nil {
 		o.logger.Error().Err(err).Msg("Failed to encode enriched payload")
-		o.failNotification(ctx, notifID, correlationID, correlationStr, "ENCODE_ERROR", "encode", channelLabel, err)
+		o.failNotification(ctx, notifID, correlationID, notification.CreatedAt, correlationStr, "ENCODE_ERROR", "encode", channelLabel, err)
 		return
 	}
 
@@ -408,7 +408,7 @@ func (o *Orchestrator) EnrichAndPublish(ctx context.Context, req dtos.Notificati
 			Str("correlation_id", correlationStr).
 			Msg("Failed to enqueue notification for publication")
 
-		o.failNotification(ctx, notifID, correlationID, correlationStr, "OUTBOX_ERROR", "outbox_enqueue", channelLabel, err)
+		o.failNotification(ctx, notifID, correlationID, notification.CreatedAt, correlationStr, "OUTBOX_ERROR", "outbox_enqueue", channelLabel, err)
 		return
 	}
 
@@ -516,10 +516,11 @@ func (o *Orchestrator) commitToOutbox(
 func (o *Orchestrator) failNotification(
 	ctx context.Context,
 	notifID, correlationID uuid.UUID,
+	createdAt time.Time,
 	correlationStr, code, stage, channel string,
 	cause error,
 ) {
-	o.notifRepo.UpdateFailure(ctx, notifID, code, cause.Error())
+	o.notifRepo.UpdateFailure(ctx, notifID, createdAt, code, cause.Error())
 	o.eventRepo.CreateEventSimple(ctx, notifID, correlationID, dtos.EventFailed, models.JSONMap{
 		"error": cause.Error(),
 		"stage": stage,

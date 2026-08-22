@@ -63,9 +63,10 @@ type ServerConfig struct {
 type ExternalServices struct {
 	UserServiceAddress     string `koanf:"user_service_address" validate:"required"`
 	TemplateServiceAddress string `koanf:"template_service_address" validate:"required"`
-	// Shared secret sent as X-Service-Token on internal service-to-service calls.
-	// Interim measure until proper service identity (mTLS or signed service JWTs).
-	InternalToken string `koanf:"internal_token" validate:"required"`
+	// Signing secret for service-to-service JWTs. Must match the JWT_SECRET the
+	// NestJS services validate with, so a service token verifies through the
+	// same path as a user's.
+	JWTSecret string `koanf:"jwt_secret" validate:"required"`
 }
 
 type Config struct {

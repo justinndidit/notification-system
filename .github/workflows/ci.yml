@@ -133,7 +133,6 @@ jobs:
           RABBITMQ_USER=guest
           RABBITMQ_PASSWORD=guest
           JWT_SECRET=ci-jwt-secret-value
-          INTERNAL_SERVICE_TOKEN=ci-internal-service-token
           DJANGO_SECRET_KEY=ci-django-secret
           POSTGRES_HOST_PORT=5432
           ENVFILE
@@ -161,10 +160,20 @@ jobs:
             done
           done
 
+      # Templates require an admin, and role is not settable at signup. This is
+      # the documented bootstrap rather than a forged token.
+      - name: Seed the admin account
+        run: |
+          docker compose -f infra/docker-compose.local.yaml exec -T \
+            -e ADMIN_EMAIL=admin@example.com \
+            -e ADMIN_PASSWORD=ci-bootstrap-admin-pw \
+            user-service sh -c 'cd /usr/src/app/services/user-service && npx ts-node prisma/seed-admin.ts'
+
       - name: Smoke test
         env:
           JWT_SECRET: ci-jwt-secret-value
-          INTERNAL_SERVICE_TOKEN: ci-internal-service-token
+          ADMIN_EMAIL: admin@example.com
+          ADMIN_PASSWORD: ci-bootstrap-admin-pw
         run: ./scripts/smoke-test.sh
 
       - name: Service logs on failure

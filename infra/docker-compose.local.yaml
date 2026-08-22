@@ -87,9 +87,6 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: 24h
 
-      # Shared secret for service-to-service calls (orchestrator enrichment)
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
-
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -132,9 +129,6 @@ services:
       # JWT
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: 24h
-
-      # Shared secret for service-to-service calls (orchestrator enrichment)
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
 
       # Redis
       REDIS_HOST: redis
@@ -203,7 +197,9 @@ services:
       # External Services
       ORCHESTRATOR_EXTERNAL.USER_SERVICE_ADDRESS: http://user-service:3007
       ORCHESTRATOR_EXTERNAL.TEMPLATE_SERVICE_ADDRESS: http://template-service:3003
-      ORCHESTRATOR_EXTERNAL.INTERNAL_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      # Signs short-lived service tokens; must match the JWT_SECRET the
+      # NestJS services validate with.
+      ORCHESTRATOR_EXTERNAL.JWT_SECRET: ${JWT_SECRET}
 
     ports:
       - "3002:8080"
@@ -392,7 +388,8 @@ services:
 
       TEMPLATE_SERVICE_URL: http://template-service:3003
       STATUS_CALLBACK_URL: http://orchestrator:8080/notifications/status
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      # Signs the service token used for status callbacks.
+      JWT_SECRET: ${JWT_SECRET}
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py runserver 0.0.0.0:8000"

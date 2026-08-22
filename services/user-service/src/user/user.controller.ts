@@ -21,7 +21,6 @@ import {
 } from './dto/user.dto';
 import { UserService } from './user.service';
 import { JwtAuthGaurd } from './jwt-auth.guard';
-import { ServiceOrJwtGuard } from '../common/service-or-jwt.guard';
 
 @Controller('user')
 export class UserController {
@@ -75,10 +74,11 @@ export class UserController {
   }
 
   //GET USER PREFERENCE BY ID
-  // Called by end users and by the orchestrator during enrichment, so it
-  // accepts either a user JWT or the internal service token.
+  // Called by end users and by the orchestrator during enrichment. Both present
+  // a JWT — the orchestrator's is short-lived and carries role "service" — so
+  // the ordinary guard covers both.
   @Get('preference/:id')
-  @UseGuards(ServiceOrJwtGuard)
+  @UseGuards(JwtAuthGaurd)
   getUserPreference(@Param('id') userId: string) {
     return this.userService.getUserPreference(userId);
   }
@@ -103,7 +103,7 @@ export class UserController {
   // Single call used by the orchestrator during enrichment: contact details
   // plus consent flags, so it doesn't have to stitch several endpoints together.
   @Get(':id/delivery-profile')
-  @UseGuards(ServiceOrJwtGuard)
+  @UseGuards(JwtAuthGaurd)
   getDeliveryProfile(@Param('id') userId: string) {
     return this.userService.getDeliveryProfile(userId);
   }

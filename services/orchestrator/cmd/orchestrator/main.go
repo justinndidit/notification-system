@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/app"
+	"github.com/justinndidit/notificationSystem/orchestrator/internal/auth"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/config"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/database"
 	"github.com/justinndidit/notificationSystem/orchestrator/internal/handlers"
@@ -86,17 +87,30 @@ func main() {
 	defer rabbitConn.Close()
 	logger.Info().Msg("RabbitMQ connected successfully")
 
+	// Service identity: short-lived signed tokens rather than a static shared
+	// secret, so a leaked credential expires on its own and cannot be replayed
+	// indefinitely.
+	issuer, err := auth.NewTokenIssuer(cfg.External.JWTSecret, "orchestrator")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to create the service token issuer")
+	}
+
+	serviceVerifier, err := auth.NewVerifier(cfg.External.JWTSecret)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to create the service token verifier")
+	}
+
 	// Initialize service clients
 	logger.Info().Msg("Initializing service clients...")
 	templateClient := services.NewTemplateClient(
 		&logger,
 		cfg.External.TemplateServiceAddress,
-		cfg.External.InternalToken,
+		issuer.Token,
 	)
 	userClient := services.NewUserClient(
 		&logger,
 		cfg.External.UserServiceAddress,
-		cfg.External.InternalToken,
+		issuer.Token,
 	)
 
 	// Initialize orchestrator
@@ -118,7 +132,7 @@ func main() {
 	healthHandler := handlers.NewHealthHandler(&logger, redisClient, db)
 
 	// Initialize app
-	app := app.NewApp(cfg, &logger, redisClient, db, notificationHandler, healthHandler)
+	app := app.NewApp(cfg, &logger, redisClient, db, notificationHandler, healthHandler, serviceVerifier)
 
 	// Setup routes
 	router := routers.SetupRoutes(app)
