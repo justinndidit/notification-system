@@ -1,73 +1,52 @@
 generator client {
   provider = "prisma-client-js"
-  
+  // Generated per service rather than into the hoisted @prisma/client. The two
+  // services no longer share a schema, so a shared client means whichever ran
+  // `prisma generate` last silently overwrites the other's types.
+  output   = "../node_modules/@notification/template-prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 enum NotificationChannel {
   EMAIL
   PUSH
 }
 
-
-
-model User {
-  id             String        @id @default(uuid())
-  name           String
-  email          String        @unique
-  password       String
-  role           String        @default("user")
-  created_at     DateTime      @default(now())
-  updated_at     DateTime      @updatedAt
-  device_tokens  Json?   // [{ token, platform: 'android' | 'ios' }]
-  preferences    Preference?
-}
-
-
-model Preference {
-  id                 String  @id @default(uuid())
-  user               User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  user_id            String  @unique
-  email_opt_in       Boolean @default(true)
-  push_opt_in        Boolean @default(true)
-  daily_limit        Int     @default(100)
-  language           String  @default("en")
-  updated_at         DateTime @updatedAt
-  created_at         DateTime @default(now())
-}
-
-
 model Template {
-  id          String             @id @default(uuid())
-  name        String             // e.g., "Order Confirmation"
-  event       String      // E-com trigger
-  channel     NotificationChannel[] // EMAIL or PUSH
-  language    String             @default("en")// e.g., 'en', 'fr' (ISO code)
-  isActive    Boolean            @default(true)
-  created_at  DateTime           @default(now())
-  updated_at  DateTime           @updatedAt
-  // Relations
-  versions    TemplateVersion[]  @relation("TemplateVersions")
-  // Optional: owner User? @relation(fields: [user_id], references: [id])
-  // user_id    String?
+  id         String                @id @default(uuid())
+  name       String                // e.g. "Order Confirmation"
+  event      String                // the trigger this template answers
+  channel    NotificationChannel[]
+  language   String                @default("en") // ISO code
+  isActive   Boolean               @default(true)
+  created_at DateTime              @default(now())
+  updated_at DateTime              @updatedAt
 
-  @@unique([event, language]) // One active per combo
+  versions TemplateVersion[] @relation("TemplateVersions")
+
+  // One template per event and language, which is what makes localized lookup
+  // by event unambiguous.
+  @@unique([event, language])
   @@index([event, language])
 }
 
+// Versions are immutable: an update creates a new one rather than mutating the
+// current version, so an in-flight notification always renders against a stable
+// version and content changes stay auditable.
 model TemplateVersion {
-  id           String   @id @default(uuid())
-  template     Template @relation("TemplateVersions", fields: [template_id], references: [id], onDelete: Cascade)
-  template_id  String
-  version      Int      @default(1) // Auto-increment per template
-  subject      String?  // For EMAIL only
-  title        String?  // For PUSH only
-  body         String   // Templated content (Handlebars)
-  variables    Json?    // Schema: { "order.id": "string", "user.name": "string" } – for validation/docs
-  created_at   DateTime @default(now())
+  id          String   @id @default(uuid())
+  template    Template @relation("TemplateVersions", fields: [template_id], references: [id], onDelete: Cascade)
+  template_id String
+  version     Int      @default(1)
+  subject     String?  // EMAIL only
+  title       String?  // PUSH only
+  body        String   // Handlebars
+  variables   Json?    // documented shape, e.g. { "user.name": "string" }
+  created_at  DateTime @default(now())
 
-  @@index([template_id, version]) // Fast latest fetch
+  @@index([template_id, version])
 }

@@ -147,3 +147,5 @@ desktop.ini
 *.swo
 *.sublime-project
 *.sublime-workspace
+# Prisma clients are generated per service at install time
+**/node_modules/@notification/

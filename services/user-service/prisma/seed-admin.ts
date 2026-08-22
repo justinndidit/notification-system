@@ -12,7 +12,7 @@
  * Idempotent: an existing user with that email is promoted rather than
  * duplicated, so it is safe to re-run.
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@notification/user-prisma';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();

@@ -16,7 +16,7 @@ import {
   Prisma,
   Template,
   TemplateVersion,
-} from '@prisma/client';
+} from '@notification/template-prisma';
 import {
   PaginatedResponse,
   PaginationMeta,
