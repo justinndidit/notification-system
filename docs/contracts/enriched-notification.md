@@ -124,11 +124,19 @@ This is what lets a message in the RabbitMQ management UI be traced back to its 
 
 ## Changing this contract
 
-The producer and both consumers are in different languages, so nothing catches a mismatch at compile time — a drifted field simply arrives as a zero value and the worker silently does the wrong thing. That has already happened once: the push worker expected `tokens`, the orchestrator never sent them, and every push notification was acknowledged and dropped while the logs read as success.
+The producer and both consumers are written in different languages with no shared
+type, so nothing catches a mismatch at compile time. A field that is renamed on
+one side simply arrives as a zero value on the other, and the worker does the
+wrong thing without erroring.
 
-So: change this document first, then the producer, then every consumer. Adding an optional field is safe. Renaming or removing one is not, and needs the consumers updated in the same change.
+The order matters: change this document, then the producer, then every consumer,
+in a single change. Adding an optional field is safe. Renaming or removing one is
+not.
 
-Known gaps, tracked in `../ENGINEERING_LOG.md`:
+`template` and `variables` are carried for auditing and debugging. Workers should
+not depend on them for delivery — `recipient`, `subject`/`title` and `body` are
+the delivery surface.
 
-- The email worker takes a differently-shaped `payload` (`request_id`, `variables.email`). The queue bridge is responsible for translating this message into that shape until the task is updated to consume the contract directly.
-- `template` and `variables` are carried for auditing and debugging. Workers should not depend on them for delivery — `recipient`, `subject`/`title`, and `body` are the delivery surface.
+The email worker takes a differently shaped payload (`request_id`,
+`variables.email`). The queue bridge is responsible for translating this message
+into that shape.

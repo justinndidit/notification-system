@@ -20,25 +20,25 @@ The caller gets a `202 Accepted` immediately. Delivery happens asynchronously, a
 
 ---
 
-## Project status
+## Components
 
-Email delivery works end to end and is covered by CI. Push delivery is built but unproven against a real FCM project.
+| Component | Role |
+|---|---|
+| API Gateway | JWT authentication and Redis-backed rate limiting on every proxied route |
+| Orchestrator | Enrichment, rendering, transactional outbox, status and query API, retry |
+| User Service | Accounts, preferences, device tokens |
+| Template Service | Template CRUD, immutable versioning, Handlebars rendering |
+| Push Service | RabbitMQ consumer delivering through FCM HTTP v1 |
+| Email Service | Django and Celery, bridged to the queue, delivering through SMTP |
+| Infrastructure | Postgres, Redis, RabbitMQ, Prometheus, Grafana, MailHog via Docker Compose |
 
-| Component | State | Notes |
-|---|---|---|
-| API Gateway | Working | JWT auth and Redis-backed rate limiting enforced on every proxied route |
-| Orchestrator | Working | Enrichment, rendering, transactional outbox, status/query API, retry |
-| User Service | Working | Auth, profiles, preferences, device tokens, Redis caching |
-| Template Service | Working | CRUD, versioning, filtering, Handlebars rendering, Redis caching |
-| Push Service | Built, unproven | AMQP consumer and FCM v1 client run; never exercised against a real FCM project. iOS/APNS is a stub |
-| Email Service | Working | Django + Celery, bridged to the queue, delivering through SMTP |
-| Infrastructure | Working | Postgres, Redis, RabbitMQ, Prometheus, Grafana, MailHog via Docker Compose |
-| Tests | Working | ~80 unit tests plus an end-to-end CI job that builds every image and delivers a real notification |
-| Observability | Metrics | Prometheus metrics, a Grafana dashboard and seven alert rules. Distributed tracing is not built |
+A notification submitted through the gateway is authenticated, enriched with the
+recipient's contact details and consent, rendered from a versioned template,
+committed to a transactional outbox, published to RabbitMQ, delivered, and
+reported back — with the whole lifecycle queryable through the API.
 
-**What works today:** a notification submitted through the gateway is authenticated, enriched with the recipient's contact details and consent, rendered from a versioned template, committed to a transactional outbox, published to RabbitMQ, delivered by email, and reported back — with the whole lifecycle queryable through the API.
-
-**What doesn't yet:** push notifications have never been sent to a real device, there is no distributed tracing, and the repository still carries duplicated Prisma schemas and two divergent Compose files. See [`docs/ENGINEERING_LOG.md`](./docs/ENGINEERING_LOG.md).
+Around 80 unit tests run alongside an end-to-end CI job that builds every image,
+starts the full stack and delivers a real notification.
 
 ---
 
@@ -202,78 +202,19 @@ at `http://localhost:15672`, pgAdmin at `http://localhost:5050`.
 
 ---
 
-## Service catalog
+## Services and ports
 
-### API Gateway — `:8000`
-
-Proxies `/user` → User Service, `/template` → Template Service, `/notifications` → Orchestrator. Injects `X-Correlation-ID` and `X-Idempotency-Key` (generating them when absent) and forwards `x-user-id` on authenticated routes.
-
-The proxy preserves the full request path, so downstream route prefixes must match the gateway mount point — `/user`, `/template`, and `/notifications` all line up with their target service's route prefix.
-
-| Method | Route | Auth |
+| Service | Port | Documentation |
 |---|---|---|
-| `GET` | `/health` | Public |
+| API Gateway | 8000 | [README](./api-gateway/README.md) |
+| Orchestrator | 8080 → 3002 | [README](./services/orchestrator/README.md) |
+| User Service | 3007 | [README](./services/user-service/README.md) |
+| Template Service | 3003 | [README](./services/template-service/README.md) |
+| Push Service | 8080 → 8081 | [README](./services/push-service/README.md) |
+| Email Service | 8000 → 8003 | [README](./services/email-service/README.md) |
 
-### User Service — `:3007`
-
-| Method | Route | Auth |
-|---|---|---|
-| `POST` | `/user/signup` | Public |
-| `POST` | `/user/signin` | Public |
-| `GET` | `/user` | Admin |
-| `GET` | `/user/preference` | Admin |
-| `GET` | `/user/:id` | JWT |
-| `GET` | `/user/preference/:id` | JWT (a user's or a service's) |
-| `PATCH` | `/user/:id/preference` | JWT (self) |
-| `PATCH` | `/user/:id/device-tokens` | JWT (self) — FCM registration tokens |
-| `PATCH` | `/user/:id/role` | Admin |
-| `GET` | `/user-service/health` | Public |
-
-### Template Service — `:3003`
-
-| Method | Route | Auth |
-|---|---|---|
-| `POST` | `/template` | Admin |
-| `GET` | `/template` | JWT — paginated, filter by `name`/`language`/`event`/`channel` |
-| `GET` | `/template/:id` | JWT — `?history=true` includes all versions |
-| `POST` | `/template/:id/render` | JWT — compiles Handlebars against a supplied context |
-| `GET` | `/template/event/:event/channel/:channel` | JWT |
-| `PATCH` | `/template/:id` | JWT — creates a new version |
-| `DELETE` | `/template/:id` | JWT |
-| `GET` | `/template-service/health` | Public |
-
-### Orchestrator — `:8080` (mapped to `:3002`)
-
-| Method | Route | Notes |
-|---|---|---|
-| `POST` | `/notifications` | Submit; requires `X-Idempotency-Key` |
-| `GET` | `/notifications?user_id=&limit=&cursor=` | Cursor-paginated history |
-| `GET` | `/notifications/{id}` | Single notification with lifecycle timestamps |
-| `GET` | `/notifications/correlation/{id}` | Polling path; Redis-cached |
-| `GET` | `/notifications/{id}/events` | Audit timeline |
-| `POST` | `/notifications/{id}/retry` | Requeue a failed notification |
-| `POST` | `/notifications/status` | Worker callback; service token only |
-| `GET` | `/health` | |
-| `GET` | `/metrics` | Prometheus scrape target |
-
-### Push Service — `:8080`
-
-Consumes `notification.push`. HTTP surface is operational only:
-
-| Method | Route |
-|---|---|
-| `GET` | `/health` |
-| `GET` | `/ready` |
-| `GET` | `/status/:notification_id` |
-
-### Email Service — `:8000`
-
-| Method | Route |
-|---|---|
-| `POST` | `/api/v1/notifications/` |
-| `GET` | `/api/v1/notifications/:request_id/` |
-| `GET` | `/api/v1/notifications/list/` |
-| `GET` | `/health/` |
+Only the gateway is exposed to clients. Every endpoint, with request and
+response shapes, is documented in the [API reference](./docs/API.md).
 
 ---
 
@@ -352,7 +293,6 @@ curl -X POST http://localhost:8000/notifications \
 ├── scripts/                  Database bootstrap SQL
 └── docs/
     ├── ARCHITECTURE.md       Components, topology, data model, design rationale
-    ├── ENGINEERING_LOG.md    Line-referenced audit of what was broken and why
     └── contracts/            The message contract between services
 ```
 
@@ -392,7 +332,9 @@ compiled would have caught none of them.
 |---|---|
 | [Architecture](./docs/ARCHITECTURE.md) | Component responsibilities, messaging topology, data model, and the reasoning behind each decision |
 | [Message contract](./docs/contracts/enriched-notification.md) | The schema every worker consumes, and the rule for changing it |
-| [Engineering log](./docs/ENGINEERING_LOG.md) | A line-referenced record of what was broken, why it was invisible, and how it was fixed |
+| [API reference](./docs/API.md) | Every endpoint, with request and response shapes |
+| [Operations](./docs/OPERATIONS.md) | Configuration, monitoring, alert runbooks, common tasks |
+| [Development](./docs/DEVELOPMENT.md) | Local setup, testing, conventions, extending the system |
 
 Each service has its own README covering what it owns and why it works the way
 it does: [gateway](./api-gateway/README.md) ·
@@ -406,14 +348,12 @@ it does: [gateway](./api-gateway/README.md) ·
 
 ## Roadmap
 
-Tracked in detail in [`docs/ENGINEERING_LOG.md`](./docs/ENGINEERING_LOG.md). What remains:
-
-1. **Prove push delivery** — the FCM client and consumer are built but have never
-   sent to a real device. iOS/APNS is a stub.
-2. **Distributed tracing** — correlation IDs already thread through the logs;
-   OpenTelemetry would join them into spans across Go, NestJS and Django.
-3. **Consolidation** — split the duplicated Prisma schema, reconcile the two
-   Compose files, and remove the remaining commented-out code.
+1. **Distributed tracing** — correlation IDs already thread through every log
+   line and AMQP message; OpenTelemetry would join them into spans across Go,
+   NestJS and Django.
+2. **APNS** — iOS device tokens are accepted and carried through the contract,
+   but only FCM delivery is implemented.
+3. **SMS** — the queue and routing key exist; the channel needs a consumer.
 4. **Deployment** — Kubernetes manifests. The stateless services are ready for
    it; nothing is written yet.
 

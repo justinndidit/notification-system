@@ -30,12 +30,12 @@ Part of the [Notification System](../../README.md).
 
 ## Why the outbox exists
 
-Enrichment used to publish to RabbitMQ from a detached goroutine and then update
-the row as a separate step. A crash between the two left them inconsistent; a
-crash before them lost the work entirely, because nothing durable was holding it.
+Publishing to the broker and recording that it happened are two operations. Done
+separately, a crash between them leaves the two inconsistent, and a crash before
+them loses the work entirely because nothing durable is holding it.
 
-Now the state change and the intent to publish commit together or not at all. A
-separate publisher drains the table with `FOR UPDATE SKIP LOCKED`, so several
+The state change and the intent to publish therefore commit together or not at
+all. A separate publisher drains the table with `FOR UPDATE SKIP LOCKED`, so several
 replicas can share the work without coordinating. Backoff pushes `available_at`
 forward rather than sleeping, so one stuck row never blocks the queue behind it.
 
@@ -45,9 +45,9 @@ or `enriching` past five minutes. Re-enrichment is safe: the outbox is uniquely
 keyed on `notification_id`, so a notification enriched twice still produces one
 message.
 
-Verified by stopping RabbitMQ mid-flight: the notification was accepted, held in
-the outbox with the broker error recorded, and delivered on its own once the
-broker returned.
+The behaviour this buys: with the broker stopped mid-flight, a notification is
+still accepted, held in the outbox with the failure recorded against it, and
+delivered on its own once the broker returns.
 
 ---
 
@@ -91,6 +91,5 @@ a window open from one month back to three ahead.
 go test -race ./...
 ```
 
-Covers the enrichment decisions (consent, recipient resolution, channel
-matching), the JSONB scanners that once broke every read, outbox backoff bounds,
-and the callback status mapping.
+Covers the enrichment decisions — consent, recipient resolution, channel matching
+— the JSONB scanners, outbox backoff bounds, and the callback status mapping.

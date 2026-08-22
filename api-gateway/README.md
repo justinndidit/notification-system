@@ -32,15 +32,14 @@ user as `x-user-id`.
 ## Two decisions worth knowing
 
 **Proxying happens in controllers, not middleware.** Middleware registered with
-`app.use()` runs *before* Nest's router, so guards and interceptors never see
-it. That is how this gateway originally shipped: `JwtAuthGuard` protected
-exactly one endpoint — `/health` — while every proxied route was wide open.
-Controllers put proxied traffic back inside the pipeline where the guards are.
+`app.use()` runs *before* Nest's router, so guards and interceptors never see it
+— proxied traffic would bypass authentication and rate limiting entirely.
+Controllers place it inside the pipeline where the guards are.
 
 **Public routes are declared, not pattern-matched.** Exemptions use `@Public()`
-on the handler. The previous implementation asked whether the URL *contained*
-`"signin"`, which made `/template/signin-banner` a public route, and kept the
-same list in three places that drifted apart.
+on the handler, so exemption is a property of the route rather than a pattern
+matched against the URL. It cannot drift from the endpoint it protects, and
+there is no second list to keep in sync.
 
 The full path is forwarded unchanged, including the mount prefix, so a
 downstream service's route prefix must match the gateway's. `/user/signup` at
@@ -77,5 +76,5 @@ pnpm test
 
 19 tests covering the auth surface: that `@Public()` is read from handler
 metadata rather than the URL, that paths merely *containing* `signin` are still
-guarded, that the catch-all routes stay authenticated, and that a caller's own
+guarded, that catch-all routes stay authenticated, and that a caller's own
 correlation and idempotency headers are preserved rather than overwritten.
